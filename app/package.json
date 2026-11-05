@@ -1,0 +1,15 @@
+{
+  "name": "gestao-cobrancas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gestão de cobranças com envio automático pelo WhatsApp",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4"
+  }
+}

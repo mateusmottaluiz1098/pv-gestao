@@ -1,0 +1,91 @@
+# Infraestrutura compartilhada por todos os clientes
+# Sobe com: ./scripts/instalar.sh (ou: docker compose -f infra/docker-compose.yml --env-file .env up -d)
+name: plataforma
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${DB_SENHA}
+      POSTGRES_DB: postgres
+      TZ: America/Sao_Paulo
+    command: >
+      postgres -c shared_buffers=128MB -c max_connections=200
+               -c effective_cache_size=512MB -c work_mem=4MB
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [plataforma]
+
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SERVER_URL: http://evolution:8080
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://admin:${DB_SENHA}@db:5432/evolution?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      DEL_INSTANCE: "false"
+      CONFIG_SESSION_PHONE_CLIENT: PV Gestao
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      QRCODE_LIMIT: "30"
+      LOG_LEVEL: ERROR,WARN
+      TZ: America/Sao_Paulo
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks: [plataforma]
+
+  # Diz ao Caddy quais subdomínios existem (só emite certificado para clientes cadastrados)
+  porteiro:
+    image: node:22-alpine
+    restart: unless-stopped
+    environment:
+      BASE_DOMINIO: ${BASE_DOMINIO}
+    command: ["node", "/porteiro.js"]
+    volumes:
+      - ./porteiro.js:/porteiro.js:ro
+      - ../clientes:/clientes:ro
+    networks: [plataforma]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [plataforma]
+
+volumes:
+  db_data:
+  evolution_instances:
+  caddy_data:
+  caddy_config:
+
+networks:
+  plataforma:
+    name: plataforma

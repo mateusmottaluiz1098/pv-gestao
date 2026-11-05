@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PV Gestão</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" id="favicon" href="">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="form-login" class="login-card">
+      <div class="logo grande"><span class="logo-marca"></span> <span class="nome-sistema">PV Gestão</span></div>
+      <label>Usuário<input name="login" autocomplete="username" autocapitalize="none" autofocus required></label>
+      <label>Senha<input type="password" name="senha" autocomplete="current-password" required></label>
+      <button class="btn primario largo">Entrar</button>
+      <p id="login-erro" class="erro-txt"></p>
+    </form>
+  </div>
+
+  <div id="app" class="layout hidden">
+    <aside class="sidebar">
+      <div class="logo"><span class="logo-marca"></span> <span class="nome-sistema">PV Gestão</span></div>
+      <nav id="menu">
+        <a href="#/painel" data-pg="painel"><i>◫</i>Visão geral</a>
+        <a href="#/agenda" data-pg="agenda"><i>▦</i>Agenda</a>
+        <a href="#/clientes" data-pg="clientes"><i>♙</i>Clientes</a>
+        <a href="#/cobrancas" data-pg="cobrancas"><i>▤</i>Cobranças</a>
+        <a href="#/comprovantes" data-pg="comprovantes"><i>⎙</i>Comprovantes <b id="badge-comp" class="badge hidden"></b></a>
+        <a href="#/whatsapp" data-pg="whatsapp"><i>◉</i>WhatsApp <b id="badge-wa" class="ponto"></b></a>
+        <a href="#/config" data-pg="config"><i>⚙</i>Configurações</a>
+        <a href="#/personalizacao" data-pg="personalizacao"><i>◐</i>Personalização</a>
+        <a href="#/usuarios" data-pg="usuarios"><i>☺</i>Usuários</a>
+      </nav>
+      <div class="sidebar-rodape">
+        <div class="eu"><b id="eu-nome"></b></div>
+        <button id="btn-senha" class="link-claro">Trocar senha</button> · <button id="btn-sair" class="link-claro">Sair</button>
+      </div>
+    </aside>
+    <main>
+      <header class="topo">
+        <button id="btn-menu" class="btn-menu" aria-label="Menu">☰</button>
+        <div class="trilha"><span class="nome-sistema">PV Gestão</span> / <b id="trilha-pg"></b></div>
+        <div id="topo-data" class="muted"></div>
+      </header>
+      <section id="conteudo"></section>
+    </main>
+  </div>
+
+  <div id="modal" class="modal hidden"><div class="modal-caixa" id="modal-caixa"></div></div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/agenda.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

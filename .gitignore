@@ -1,0 +1,6 @@
+.env
+clientes/*.env
+backups/*
+!backups/.gitkeep
+infra/Caddyfile
+node_modules/
