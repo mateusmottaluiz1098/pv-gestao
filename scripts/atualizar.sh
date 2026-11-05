@@ -12,6 +12,12 @@ if [ -d "$RAIZ/.git" ] && [ -z "${PV_JA_PUXOU:-}" ]; then
   PV_JA_PUXOU=1 exec "$RAIZ/scripts/atualizar.sh" "$@"
 fi
 
+# Liga a atualização automática (a VM confere o GitHub a cada 5 min). Desligar: touch $RAIZ/.sem-auto
+if [ -d "$RAIZ/.git" ] && [ ! -f "$RAIZ/.sem-auto" ] && [ ! -f /etc/cron.d/pv-gestao-auto ] && [ -w /etc/cron.d ]; then
+  printf '*/5 * * * * root %s/scripts/auto-atualizar.sh\n' "$RAIZ" > /etc/cron.d/pv-gestao-auto
+  verde "Atualização automática ligada (confere o GitHub a cada 5 minutos)."
+fi
+
 amarelo "Fazendo backup antes de atualizar..."
 "$RAIZ/scripts/backup.sh" >/dev/null
 
