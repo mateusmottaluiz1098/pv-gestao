@@ -74,8 +74,15 @@ async function pgAgenda(el) {
   if (!ativos.length) { $('#ag-titulo').textContent = ''; return; }
 
   const passo = AG.vista === 'semana' ? 7 : AG.vista === '3dias' ? 3 : 1;
-  $('#ag-ant').onclick = () => { AG.data = addDias(AG.data, -passo); desenharAgenda(); };
-  $('#ag-prox').onclick = () => { AG.data = addDias(AG.data, passo); desenharAgenda(); };
+  $('#ag-ant').onclick = () => {
+    if (AG.vista === '3dias') { // volta 3 dias de funcionamento
+      let d = AG.data, n = 0;
+      for (let i = 0; i < 21 && n < 3; i++) { d = addDias(d, -1); if (diaAberto(d)) n++; }
+      AG.data = n ? d : addDias(AG.data, -3);
+    } else AG.data = addDias(AG.data, -passo);
+    desenharAgenda();
+  };
+  $('#ag-prox').onclick = () => { AG.data = AG.vista === '3dias' && AG.ultimoDia ? addDias(AG.ultimoDia, 1) : addDias(AG.data, passo); desenharAgenda(); };
   $('#ag-hoje').onclick = () => { AG.data = hojeLocal(); desenharAgenda(); };
   $('#ag-data').onchange = (e) => { if (e.target.value) { AG.data = e.target.value; desenharAgenda(); } };
   $$('#ag-vista button').forEach((b) => {
@@ -87,16 +94,27 @@ async function pgAgenda(el) {
   if (!window._agResize) { window._agResize = true; window.addEventListener('resize', ajustarAlturaAgenda); }
   ajustarAlturaAgenda();
   await desenharAgenda(true);
+  ajustarAlturaAgenda();
   timers.push(setInterval(() => { if (!$('#modal').classList.contains('hidden')) return; desenharAgenda(); }, 60000));
 }
 
 // a grade ocupa toda a altura que sobra na tela
+// a grade cresce até o fim da tela (deixando uma margem) e encolhe se tiver poucos horários
 function ajustarAlturaAgenda() {
   const w = $('#ag-wrap');
   if (!w) return;
   const topo = w.getBoundingClientRect().top + window.scrollY;
-  w.style.height = `${Math.max(380, window.innerHeight - topo - 14)}px`;
+  w.style.maxHeight = `${Math.max(320, window.innerHeight - topo - 22)}px`;
 }
+
+// profissionais que entram na conta (todos os ativos ou o filtrado)
+function profsVisiveis() {
+  const ativos = AG.profs.filter((p) => p.ativo);
+  if (AG.vista !== 'dia' && AG.profSemana) return ativos.filter((p) => p.id === AG.profSemana);
+  return ativos;
+}
+const trabalhaNoDia = (p, d) => ((p.expediente || {}).dias || []).includes(dow(d));
+function diaAberto(d) { return profsVisiveis().some((p) => trabalhaNoDia(p, d)); }
 
 async function desenharAgenda(rolar) {
   const wrap = $('#ag-wrap');
@@ -106,13 +124,20 @@ async function desenharAgenda(rolar) {
   let colunas;
   let de, ate;
   if (AG.vista !== 'dia') {
-    const nDias = AG.vista === 'semana' ? 7 : 3;
-    de = AG.vista === 'semana' ? inicioSemana(AG.data) : AG.data; ate = addDias(de, nDias - 1);
+    let dias;
+    if (AG.vista === 'semana') {
+      de = inicioSemana(AG.data);
+      dias = Array.from({ length: 7 }, (_, i) => addDias(de, i));
+    } else { // 3 dias de funcionamento a partir da data escolhida (pula dias fechados)
+      dias = [];
+      for (let i = 0; i < 21 && dias.length < 3; i++) { const d = addDias(AG.data, i); if (diaAberto(d)) dias.push(d); }
+      if (!dias.length) dias = [0, 1, 2].map((i) => addDias(AG.data, i));
+      de = dias[0];
+    }
+    ate = dias[dias.length - 1];
+    AG.ultimoDia = ate;
     const prof = AG.profSemana ? AG.profs.find((p) => p.id === AG.profSemana) : null;
-    colunas = Array.from({ length: nDias }, (_, i) => {
-      const d = addDias(de, i);
-      return { chave: d, data: d, prof, todos: !prof, titulo: `${DIAS_CURTO[dow(d)]} ${d.slice(8)}/${d.slice(5, 7)}`, hoje: d === hojeLocal() };
-    });
+    colunas = dias.map((d) => ({ chave: d, data: d, prof, todos: !prof, titulo: `${DIAS_CURTO[dow(d)]} ${d.slice(8)}/${d.slice(5, 7)}`, hoje: d === hojeLocal() }));
     $('#ag-titulo').textContent = `${prof ? prof.nome : 'Todos os profissionais'} · ${brData(de)} a ${brData(ate)}`;
   } else {
     de = ate = AG.data;
@@ -120,10 +145,26 @@ async function desenharAgenda(rolar) {
     $('#ag-titulo').textContent = dataLonga(AG.data) + (AG.data === hojeLocal() ? ' · hoje' : '');
   }
   AG.itens = await api(`/agenda?de=${de}&ate=${ate}`);
+  // semana: esconde dias em que ninguém trabalha (a não ser que tenha algo marcado)
+  if (AG.vista === 'semana') {
+    const comItem = new Set(AG.itens.filter((a) => a.status !== 'cancelado').map((a) => a.inicio_local.slice(0, 10)));
+    const abertos = colunas.filter((c) => diaAberto(c.data) || comItem.has(c.data));
+    if (abertos.length) colunas = abertos;
+  }
 
   const intervalo = Number(CONFIG.agenda_intervalo) || 30;
-  let ini = minDe(CONFIG.agenda_inicio || '08:00');
-  let fim = minDe(CONFIG.agenda_fim || '20:00');
+  // a grade vai do primeiro horário de abertura ao último de fechamento dos profissionais mostrados
+  const exps = [];
+  for (const c of colunas) {
+    for (const p of (c.todos ? profsVisiveis() : [c.prof])) {
+      const e = p.expediente || {};
+      if (trabalhaNoDia(p, c.data) && e.inicio && e.fim) exps.push(e);
+    }
+  }
+  let ini = exps.length ? Math.min(...exps.map((e) => minDe(e.inicio))) : minDe(CONFIG.agenda_inicio || '08:00');
+  let fim = exps.length ? Math.max(...exps.map((e) => minDe(e.fim))) : minDe(CONFIG.agenda_fim || '20:00');
+  ini = Math.floor(ini / intervalo) * intervalo;
+  fim = Math.ceil(fim / intervalo) * intervalo;
   // amplia a grade se houver atendimento fora do horário mostrado
   for (const a of AG.itens) {
     ini = Math.min(ini, Math.floor(minDe(a.inicio_local.slice(11)) / 60) * 60);
@@ -217,10 +258,10 @@ async function desenharAgenda(rolar) {
   $$('.ag-ev', wrap).forEach((e) => e.onclick = (ev) => { ev.stopPropagation(); modalAgendamento(AG.itens.find((a) => a.id == e.dataset.ag)); });
 
   if (rolar) {
-    const alvo = AG.data === hojeLocal() ? new Date().getHours() * 60 - 60 : minDe('08:00');
+    const alvo = colunas.some((c) => c.hoje) ? new Date().getHours() * 60 - 60 : ini;
     wrap.scrollTop = Math.max(0, (alvo - ini) * PX_MIN);
     const colHoje = wrap.querySelector(`.ag-col[data-data="${hojeLocal()}"]`);
-    if (AG.vista === 'semana' && colHoje) wrap.scrollLeft = Math.max(0, colHoje.offsetLeft - 56);
+    if (AG.vista === 'semana' && colHoje && colHoje.offsetLeft + colHoje.offsetWidth > wrap.clientWidth) wrap.scrollLeft = Math.max(0, colHoje.offsetLeft - 56);
   }
 }
 
