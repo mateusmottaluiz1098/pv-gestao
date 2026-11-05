@@ -9,7 +9,7 @@ const AG = {
   servs: [],
   itens: [],
 };
-const PX_MIN = 1.6;    // altura em px de cada minuto
+const PX_MIN = 2;      // altura em px de cada minuto
 const DIAS_CURTO = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const CORES_PROF = ['#31b2e8', '#14a97c', '#7b5cf0', '#e0488f', '#f07a21', '#e2b007', '#4a6380', '#d6453d'];
 const NOME_STATUS = { agendado: 'Agendado', confirmado: 'Confirmado', concluido: 'Concluído', faltou: 'Faltou', cancelado: 'Cancelado', bloqueio: 'Bloqueado' };
@@ -36,6 +36,7 @@ async function pgAgenda(el) {
         <a class="btn" id="ag-com" href="#/comissoes">Comissões</a>
         <button class="btn" id="ag-prof">Profissionais</button>
         <button class="btn" id="ag-serv">Serviços</button>
+        <button class="btn" id="ag-cheia" title="Esconder o menu e usar a tela toda">⛶ <span>Tela cheia</span></button>
         <button class="btn primario" id="ag-novo">＋ Agendar</button>
       </div>
     </div>
@@ -58,6 +59,14 @@ async function pgAgenda(el) {
       <div class="ag-wrap" id="ag-wrap"></div>
     </div>`}`;
 
+  const marcarCheia = () => { const b = $('#ag-cheia span'); if (b) b.textContent = document.body.classList.contains('tela-cheia') ? 'Sair da tela cheia' : 'Tela cheia'; };
+  try { document.body.classList.toggle('tela-cheia', localStorage.getItem('ag_cheia') === '1'); } catch (e) { /* sem storage */ }
+  marcarCheia();
+  $('#ag-cheia').onclick = () => {
+    const on = document.body.classList.toggle('tela-cheia');
+    try { localStorage.setItem('ag_cheia', on ? '1' : '0'); } catch (e) { /* sem storage */ }
+    marcarCheia(); ajustarAlturaAgenda();
+  };
   $('#ag-prof').onclick = () => modalProfissionais();
   $('#ag-serv').onclick = () => modalServicos();
   const p2 = $('#ag-prof2'); if (p2) p2.onclick = () => modalProfissionais();
@@ -75,8 +84,18 @@ async function pgAgenda(el) {
   });
   $('#ag-psem').onchange = (e) => { AG.profSemana = Number(e.target.value); desenharAgenda(); };
 
+  if (!window._agResize) { window._agResize = true; window.addEventListener('resize', ajustarAlturaAgenda); }
+  ajustarAlturaAgenda();
   await desenharAgenda(true);
   timers.push(setInterval(() => { if (!$('#modal').classList.contains('hidden')) return; desenharAgenda(); }, 60000));
+}
+
+// a grade ocupa toda a altura que sobra na tela
+function ajustarAlturaAgenda() {
+  const w = $('#ag-wrap');
+  if (!w) return;
+  const topo = w.getBoundingClientRect().top + window.scrollY;
+  w.style.height = `${Math.max(380, window.innerHeight - topo - 14)}px`;
 }
 
 async function desenharAgenda(rolar) {

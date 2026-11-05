@@ -145,6 +145,7 @@ async function rotear() {
   const [titulo, fn] = PAGINAS[pg];
   $$('#menu a').forEach((a) => a.classList.toggle('ativo', a.dataset.pg === pg || (pg === 'comissoes' && a.dataset.pg === 'agenda')));
   $('#trilha-pg').textContent = titulo;
+  document.body.dataset.pg = pg;
   $('.sidebar').classList.remove('aberta');
   $('#conteudo').innerHTML = '<p class="muted">Carregando…</p>';
   try { await fn($('#conteudo')); aplicarPermissoes($('#conteudo')); } catch (e) { $('#conteudo').innerHTML = `<div class="aviso">${esc(e.message)}</div>`; }

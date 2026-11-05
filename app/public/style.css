@@ -236,7 +236,17 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(var(--sombra
 .seg button { border: 0; background: #fff; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; color: var(--muted); }
 .seg button.sel { background: var(--azul-claro); color: var(--texto); }
 .ag-resumo { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 18px; border-bottom: 1px solid var(--borda); font-size: 13px; }
-.ag-wrap { overflow: auto; max-height: calc(100vh - 290px); min-height: 380px; position: relative; }
+.ag-wrap { overflow: auto; height: calc(100vh - 250px); min-height: 380px; position: relative; }
+/* agenda usa a largura toda e cabeçalho compacto */
+body[data-pg="agenda"] #conteudo { max-width: none; padding: 14px 18px 0; }
+body[data-pg="agenda"] .cabecalho { margin-bottom: 10px; align-items: center; }
+body[data-pg="agenda"] .cabecalho h1 { font-size: 21px; margin: 0; }
+body[data-pg="agenda"] .cartao-topo { padding: 10px 14px; }
+body[data-pg="agenda"] .ag-resumo { padding: 7px 14px; }
+@media (min-width: 761px) {
+  body[data-pg="agenda"].tela-cheia .sidebar, body[data-pg="agenda"].tela-cheia .topo { display: none; }
+  body[data-pg="agenda"].tela-cheia #conteudo { padding-top: 10px; }
+}
 .ag-grade { min-width: calc(56px + var(--ncol) * var(--colmin, 150px)); }
 .ag-cab { display: grid; grid-template-columns: 56px repeat(var(--ncol), minmax(var(--colmin, 150px), 1fr)); position: sticky; top: 0; z-index: 3; background: #fff; border-bottom: 1px solid var(--borda); }
 .ag-canto { position: sticky; left: 0; background: #fff; }
@@ -274,7 +284,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(var(--sombra
 .cores-prof input[type=color] { width: 40px; height: 32px; padding: 2px; margin: 0; }
 .chip { border: 1px solid var(--borda); border-radius: 99px; padding: 5px 10px; margin: 0; }
 #ag-livres a { font-weight: 600; }
-@media (max-width: 760px) { .ag-wrap { max-height: calc(100vh - 340px); } }
+@media (max-width: 760px) { body[data-pg="agenda"] #conteudo { padding: 10px 8px 0; } #ag-cheia { display: none; } }
 
 @media print {
   .sidebar, .topo, .acoes, #com-per, #com-datas, .btn { display: none !important; }
