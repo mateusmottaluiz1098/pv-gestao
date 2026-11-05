@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS cobrancas (
 );
 ALTER TABLE cobrancas ADD COLUMN IF NOT EXISTS pago_por TEXT;
 CREATE INDEX IF NOT EXISTS cobrancas_venc_idx ON cobrancas (vencimento, status);
+-- cobrança semanal/quinzenal e cobranças avulsas (consumo, fiado)
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS dia_semana INT;
+ALTER TABLE cobrancas ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'recorrente';
+ALTER TABLE cobrancas ADD COLUMN IF NOT EXISTS descricao TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS cobrancas_recorrente_uniq ON cobrancas (cliente_id, competencia) WHERE tipo = 'recorrente';
+ALTER TABLE cobrancas DROP CONSTRAINT IF EXISTS cobrancas_cliente_id_competencia_key;
+CREATE INDEX IF NOT EXISTS cobrancas_comp_idx ON cobrancas (competencia);
 
 CREATE TABLE IF NOT EXISTS mensagens (
   id SERIAL PRIMARY KEY,

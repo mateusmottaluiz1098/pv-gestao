@@ -25,23 +25,23 @@ const PADRAO = {
   regua: [
     {
       id: 'antes2', dias: -2, ativo: true,
-      modelo: 'Olá, {primeiro_nome}! 😊\nPassando para lembrar que a mensalidade da {empresa} de {valor} vence em {vencimento}.\n\nVocê pode pagar pelo Pix abaixo. Depois é só mandar o comprovante aqui mesmo. Obrigado!',
+      modelo: 'Olá, {primeiro_nome}! 😊\nPassando para lembrar que o pagamento de {valor} ({descricao}) da {empresa} vence em {vencimento}.\n\nVocê pode pagar pelo Pix abaixo. Depois é só mandar o comprovante aqui mesmo. Obrigado!',
     },
     {
       id: 'dia0', dias: 0, ativo: true,
-      modelo: 'Olá, {primeiro_nome}! Hoje ({vencimento}) vence a mensalidade da {empresa} no valor de {valor}.\n\nSegue o Pix abaixo. Se já pagou, pode desconsiderar e mandar o comprovante por aqui. 🙏',
+      modelo: 'Olá, {primeiro_nome}! Hoje ({vencimento}) vence o pagamento de {valor} ({descricao}) da {empresa}.\n\nSegue o Pix abaixo. Se já pagou, pode desconsiderar e mandar o comprovante por aqui. 🙏',
     },
     {
       id: 'depois1', dias: 1, ativo: true,
-      modelo: 'Oi, {primeiro_nome}, tudo bem? Não identificamos ainda o pagamento da mensalidade de {valor} que venceu ontem ({vencimento}).\n\nSegue o Pix para facilitar. Se já pagou, é só mandar o comprovante aqui.',
+      modelo: 'Oi, {primeiro_nome}, tudo bem? Não identificamos ainda o pagamento de {valor} ({descricao}) que venceu ontem ({vencimento}).\n\nSegue o Pix para facilitar. Se já pagou, é só mandar o comprovante aqui.',
     },
     {
       id: 'depois5', dias: 5, ativo: true,
-      modelo: 'Olá, {primeiro_nome}. A mensalidade da {empresa} de {valor} está em aberto há {dias_atraso} dias (venc. {vencimento}).\n\nPodemos contar com o pagamento? Pix abaixo. Qualquer dificuldade, me chama por aqui.',
+      modelo: 'Olá, {primeiro_nome}. O pagamento de {valor} ({descricao}) da {empresa} está em aberto há {dias_atraso} dias (venc. {vencimento}).\n\nPodemos contar com o pagamento? Pix abaixo. Qualquer dificuldade, me chama por aqui.',
     },
     {
       id: 'depois10', dias: 10, ativo: true,
-      modelo: '{primeiro_nome}, seguimos com a mensalidade de {valor} em aberto desde {vencimento} ({dias_atraso} dias).\n\nPor favor, regularize pelo Pix abaixo ou me avise se precisar combinar outra data.',
+      modelo: '{primeiro_nome}, seguimos com o pagamento de {valor} ({descricao}) em aberto desde {vencimento} ({dias_atraso} dias).\n\nPor favor, regularize pelo Pix abaixo ou me avise se precisar combinar outra data.',
     },
   ],
 
@@ -58,6 +58,21 @@ const PADRAO = {
 
   agradecer_pagamento: true,
   modelo_agradecimento: 'Pagamento de {valor} recebido, {primeiro_nome}! Muito obrigado. 💙\n— {empresa}',
+
+  modelo_avulso: 'Olá, {primeiro_nome}! Segue o valor de {valor} referente a {descricao} na {empresa}.\n\nPode pagar pelo Pix abaixo e mandar o comprovante aqui. Obrigado! 🙏',
+
+  // retorno: chama de volta quem não aparece há um tempo
+  retorno_ativo: false,
+  retorno_dias: 30,
+  retorno_hora: '10:00',
+  retorno_limite: 20,
+  retorno_msg: 'Fala, {primeiro_nome}! 💈 Já faz {dias} dias desde o seu último {servico} aqui na {empresa}.\n\nBora dar um tapa no visual? {link_agendamento}',
+
+  // agendamento online pelo próprio cliente
+  online_ativo: false,
+  online_antecedencia_min: 60,
+  online_dias: 30,
+  online_aviso: '',
 
   responder_comprovante: true,
   modelo_resposta_comprovante: 'Recebemos seu comprovante, {primeiro_nome}! Vamos conferir e já damos baixa. Obrigado! 🙏',
@@ -115,4 +130,10 @@ async function salvarLogo(logo) {
   }
 }
 
-module.exports = { obter, salvar, PADRAO, TEMAS, marcarExecucao, ultimaExecucao, obterLogo, salvarLogo };
+// valores internos (começam com _), ex.: endereço público do sistema
+async function salvarInterno(chave, valor) {
+  await q('INSERT INTO config (chave, valor) VALUES ($1, $2) ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor', ['_' + chave, JSON.stringify(valor)]);
+  cache = null;
+}
+
+module.exports = { obter, salvar, salvarInterno, PADRAO, TEMAS, marcarExecucao, ultimaExecucao, obterLogo, salvarLogo };

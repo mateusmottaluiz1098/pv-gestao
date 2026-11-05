@@ -4,19 +4,64 @@ const wa = require('./whatsapp');
 const { gerarPix, qrDataUrl } = require('./pix');
 const U = require('./util');
 
-// ---------- Geração das cobranças mensais ----------
+// ---------- Geração das cobranças (mensal, carnê, semanal, quinzenal) ----------
+
+const PERIODICAS = { semanal: 7, quinzenal: 14 };
+const HORIZONTE_PERIODICA = 10; // gera as cobranças semanais/quinzenais que vencem nos próximos N dias
+
+// insere uma cobrança recorrente (ignora se já existe) e junta nela o fiado pendente do cliente
+async function inserirRecorrente(c, competencia, venc, parcela) {
+  const r = await q(
+    `INSERT INTO cobrancas (cliente_id, competencia, numero_parcela, vencimento, valor, tipo)
+     VALUES ($1, $2, $3, $4, $5, 'recorrente')
+     ON CONFLICT (cliente_id, competencia) WHERE tipo = 'recorrente' DO NOTHING RETURNING id, vencimento`,
+    [c.id, competencia, parcela, venc, c.valor]
+  );
+  if (r.rows[0] && r.rows[0].vencimento >= U.hoje()) await anexarConsumosPendentes(c.id, r.rows[0].id);
+  return r.rowCount;
+}
+
+// soma o fiado pendente (consumos ainda não cobrados) numa cobrança em aberto
+async function anexarConsumosPendentes(clienteId, cobrancaId) {
+  const { rows } = await q(
+    `UPDATE consumos SET cobranca_id = $2 WHERE cliente_id = $1 AND cobranca_id IS NULL AND status = 'pendente' RETURNING valor`,
+    [clienteId, cobrancaId]
+  );
+  const soma = rows.reduce((s, r) => s + Number(r.valor || 0), 0);
+  if (soma) await q('UPDATE cobrancas SET valor = valor + $1 WHERE id = $2', [soma, cobrancaId]);
+  return soma;
+}
+
+// solta o fiado de uma cobrança (antes de apagá-la) para ele ir para a próxima
+async function soltarConsumos(cobrancaIds) {
+  if (!cobrancaIds.length) return;
+  await q('UPDATE consumos SET cobranca_id = NULL WHERE cobranca_id = ANY($1)', [cobrancaIds]);
+}
 
 async function gerarCobrancas(clienteId = null) {
   const params = [];
-  let filtro = 'WHERE ativo';
+  let filtro = "WHERE ativo AND forma <> 'avulso'";
   if (clienteId) { params.push(clienteId); filtro += ' AND id = $1'; }
   const { rows: clientes } = await q(`SELECT * FROM clientes ${filtro}`, params);
   const hoje = U.hoje();
   const [hy, hm] = hoje.split('-').map(Number);
-  // gera até o mês seguinte ao atual
+  // mensal/carnê: gera até o mês seguinte ao atual
   const limiteIdx = hy * 12 + hm; // (mês seguinte, base 0) = hy*12 + (hm-1) + 1
   let criadas = 0;
   for (const c of clientes) {
+    const passo = PERIODICAS[c.forma];
+    if (passo) {
+      // semanal/quinzenal: a competência é a própria data de vencimento
+      const limite = U.somarDias(hoje, HORIZONTE_PERIODICA);
+      let venc = c.primeiro_vencimento;
+      const { rows: mx } = await q("SELECT MAX(competencia) AS m FROM cobrancas WHERE cliente_id = $1 AND tipo = 'recorrente'", [c.id]);
+      if (mx[0].m && mx[0].m > venc) venc = U.somarDias(venc, Math.floor(U.diffDias(mx[0].m, venc) / passo) * passo);
+      while (venc <= limite) {
+        criadas += await inserirRecorrente(c, venc, venc, null);
+        venc = U.somarDias(venc, passo);
+      }
+      continue;
+    }
     const [py, pm] = c.primeiro_vencimento.split('-').map(Number);
     let idx = py * 12 + (pm - 1);
     let n = 1;
@@ -26,36 +71,75 @@ async function gerarCobrancas(clienteId = null) {
       const m = (idx % 12) + 1;
       const competencia = `${y}-${String(m).padStart(2, '0')}-01`;
       const venc = n === 1 ? c.primeiro_vencimento : U.vencimentoNoMes(y, m, c.dia_vencimento);
-      const r = await q(
-        `INSERT INTO cobrancas (cliente_id, competencia, numero_parcela, vencimento, valor)
-         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cliente_id, competencia) DO NOTHING`,
-        [c.id, competencia, c.forma === 'carne' ? n : null, venc, c.valor]
-      );
-      criadas += r.rowCount;
+      criadas += await inserirRecorrente(c, competencia, venc, c.forma === 'carne' ? n : null);
       idx++; n++;
     }
   }
   return criadas;
 }
 
-// Ao editar cliente, atualiza cobranças futuras em aberto
-async function ajustarCobrancasFuturas(cliente) {
+// Ao editar cliente, atualiza cobranças futuras em aberto (anterior = como o cliente estava antes)
+async function ajustarCobrancasFuturas(cliente, anterior = null) {
   const hoje = U.hoje();
+  const mudouForma = anterior && anterior.forma !== cliente.forma;
+  const mudouAgenda = anterior && (anterior.primeiro_vencimento !== cliente.primeiro_vencimento || anterior.dia_semana !== cliente.dia_semana
+    || Number(anterior.valor) !== Number(cliente.valor) || anterior.ativo !== cliente.ativo);
+  if (PERIODICAS[cliente.forma] && anterior && !mudouForma && !mudouAgenda) return; // nada que afete as cobranças
+  if (PERIODICAS[cliente.forma] || cliente.forma === 'avulso' || mudouForma) {
+    // recomeça as cobranças futuras do zero (o fiado anexado volta a ficar pendente e vai para a próxima)
+    const { rows } = await q(
+      "SELECT id FROM cobrancas WHERE cliente_id = $1 AND tipo = 'recorrente' AND status = 'aberto' AND vencimento > $2",
+      [cliente.id, hoje]
+    );
+    const ids = rows.map((r) => r.id);
+    await soltarConsumos(ids);
+    if (ids.length) await q('DELETE FROM cobrancas WHERE id = ANY($1)', [ids]);
+    return;
+  }
   const { rows } = await q(
-    "SELECT id, competencia, numero_parcela FROM cobrancas WHERE cliente_id = $1 AND status = 'aberto' AND vencimento >= $2",
+    "SELECT id, competencia, numero_parcela FROM cobrancas WHERE cliente_id = $1 AND tipo = 'recorrente' AND status = 'aberto' AND vencimento >= $2",
     [cliente.id, hoje]
   );
   for (const r of rows) {
     const [y, m] = r.competencia.split('-').map(Number);
     const venc = U.vencimentoNoMes(y, m, cliente.dia_vencimento);
-    await q('UPDATE cobrancas SET valor = $1, vencimento = $2 WHERE id = $3', [cliente.valor, venc, r.id]);
-  }
-  if (cliente.forma === 'carne' && cliente.parcelas_total) {
     await q(
-      "DELETE FROM cobrancas WHERE cliente_id = $1 AND status = 'aberto' AND numero_parcela > $2",
-      [cliente.id, cliente.parcelas_total]
+      'UPDATE cobrancas SET valor = $1 + COALESCE((SELECT SUM(valor) FROM consumos WHERE cobranca_id = $3), 0), vencimento = $2 WHERE id = $3',
+      [cliente.valor, venc, r.id]
     );
   }
+  if (cliente.forma === 'carne' && cliente.parcelas_total) {
+    const { rows: sobra } = await q(
+      "SELECT id FROM cobrancas WHERE cliente_id = $1 AND tipo = 'recorrente' AND status = 'aberto' AND numero_parcela > $2",
+      [cliente.id, cliente.parcelas_total]
+    );
+    await soltarConsumos(sobra.map((r) => r.id));
+    if (sobra.length) await q('DELETE FROM cobrancas WHERE id = ANY($1)', [sobra.map((r) => r.id)]);
+  }
+}
+
+// Cobrança avulsa (consumo, fiado): vence na data informada
+async function criarAvulsa(clienteId, { valor, descricao, vencimento }) {
+  const venc = vencimento || U.hoje();
+  const { rows } = await q(
+    `INSERT INTO cobrancas (cliente_id, competencia, vencimento, valor, tipo, descricao)
+     VALUES ($1, $2, $2, $3, 'avulsa', $4) RETURNING *`,
+    [clienteId, venc, valor, descricao || null]
+  );
+  return rows[0];
+}
+
+// texto que identifica a cobrança na mensagem ({descricao})
+function descricaoCobranca(cb, cliente) {
+  if (!cb) return '';
+  if (cb.descricao) return cb.descricao;
+  if (cb.tipo === 'avulsa') return 'consumo';
+  const dm = U.brData(cb.vencimento).slice(0, 5);
+  const forma = cliente && cliente.forma;
+  if (forma === 'semanal') return `semana de ${dm}`;
+  if (forma === 'quinzenal') return `quinzena de ${dm}`;
+  if (cb.numero_parcela) return `parcela ${cb.numero_parcela}${cliente && cliente.parcelas_total ? '/' + cliente.parcelas_total : ''}`;
+  return cb.competencia ? `mensalidade de ${U.nomeMes(cb.competencia)}` : 'mensalidade';
 }
 
 // ---------- Mensagens ----------
@@ -90,7 +174,8 @@ async function renderizar(modelo, cliente, cobranca, extra = {}) {
     pix: c.pix_chave || '',
     empresa: c.empresa || '',
     parcela,
-    mes: cobranca ? U.nomeMes(cobranca.competencia) : '',
+    mes: cobranca && cobranca.competencia ? U.nomeMes(cobranca.competencia) : '',
+    descricao: descricaoCobranca(cobranca, cliente),
     total_aberto: U.brl(ab.total),
     qtd_aberto: String(ab.qtd),
   };
@@ -290,6 +375,10 @@ async function marcarPago(id, { data, valor, forma, obs, agradecer, por }) {
     [dataPg, valorPg, forma || 'pix', obs || null, id, por || null]
   );
   const c = await cfg.obter();
+  // atendimentos pendurados (fiado) que entraram nesta cobrança passam a constar como pagos
+  await q(
+    `UPDATE agendamentos SET pago = TRUE, pago_em = COALESCE(pago_em, now())
+      WHERE id IN (SELECT agendamento_id FROM consumos WHERE cobranca_id = $1 AND agendamento_id IS NOT NULL)`, [id]);
   const deveAgradecer = agradecer === undefined ? c.agradecer_pagamento : agradecer;
   if (deveAgradecer) {
     const { rows: cl } = await q('SELECT * FROM clientes WHERE id = $1', [cb.cliente_id]);
@@ -307,7 +396,15 @@ async function marcarPago(id, { data, valor, forma, obs, agradecer, por }) {
   }
 }
 
+// desfaz o pagamento (e volta os atendimentos pendurados para "não pago")
+async function desfazerPagamento(id) {
+  await q("UPDATE cobrancas SET status='aberto', pago_em=NULL, pago_valor=NULL, forma_pagamento=NULL, pago_por=NULL WHERE id=$1", [id]);
+  await q(
+    `UPDATE agendamentos SET pago = FALSE, pago_em = NULL
+      WHERE forma_pagamento = 'fiado' AND id IN (SELECT agendamento_id FROM consumos WHERE cobranca_id = $1 AND agendamento_id IS NOT NULL)`, [id]);
+}
+
 module.exports = {
-  gerarCobrancas, ajustarCobrancasFuturas, renderizar, pixDaCobranca, enviarCobranca, registrar,
+  gerarCobrancas, ajustarCobrancasFuturas, criarAvulsa, anexarConsumosPendentes, soltarConsumos, descricaoCobranca, desfazerPagamento, PERIODICAS, renderizar, pixDaCobranca, enviarCobranca, registrar,
   montarFila, executarFila, pararFila, execucao, iniciarAgendador, marcarPago, nomeEtapa, primeiroNome,
 };

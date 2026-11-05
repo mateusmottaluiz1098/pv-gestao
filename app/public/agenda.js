@@ -226,7 +226,7 @@ function modalAgendamento(a, padrao = {}) {
   abrirModal(`<form id="f-ag">
     <div class="modal-topo"><h2>${novo ? 'Novo agendamento' : bloq ? 'Horário bloqueado' : 'Agendamento'}</h2><button type="button" class="fechar" data-fechar>×</button></div>
     <div class="modal-corpo">
-      ${!novo && !bloq ? `<div style="margin-bottom:12px"><span class="tag st-tag-${v.status}">${NOME_STATUS[v.status]}</span> ${v.pago ? '<span class="tag pago">Pago</span>' : ''} ${a.criado_por ? `<span class="muted pequeno">· marcado por ${esc(a.criado_por)}</span>` : ''}</div>` : ''}
+      ${!novo && !bloq ? `<div style="margin-bottom:12px"><span class="tag st-tag-${v.status}">${NOME_STATUS[v.status]}</span> ${v.pago ? '<span class="tag pago">Pago</span>' : ''} ${v.forma_pagamento === 'fiado' ? '<span class="tag hoje">Fiado</span>' : ''} ${a.origem === 'online' ? '<span class="tag aberto">Marcado online</span>' : ''} ${a.criado_por ? `<span class="muted pequeno">· marcado por ${esc(a.criado_por)}</span>` : ''}</div>` : ''}
       <label class="check"><input type="checkbox" name="bloqueio" ${bloq ? 'checked' : ''}> Bloquear horário (folga, compromisso…) em vez de atender cliente</label>
       <div class="linha">
         <label>Profissional<select name="profissional_id">${ativos.map((p) => `<option value="${p.id}" ${p.id == v.profissional_id ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select></label>
@@ -250,7 +250,7 @@ function modalAgendamento(a, padrao = {}) {
         </div>
         <div class="linha">
           <label class="check" style="margin-top:4px"><input type="checkbox" name="pago" ${v.pago ? 'checked' : ''}> Pago</label>
-          <label>Forma de pagamento<select name="forma_pagamento"><option value="">—</option>${['pix', 'dinheiro', 'cartao', 'debito'].map((f) => `<option value="${f}" ${f === v.forma_pagamento ? 'selected' : ''}>${{ pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Cartão de crédito', debito: 'Cartão de débito' }[f]}</option>`).join('')}</select></label>
+          <label>Forma de pagamento<select name="forma_pagamento"><option value="">—</option>${['pix', 'dinheiro', 'cartao', 'debito'].map((f) => `<option value="${f}" ${f === v.forma_pagamento ? 'selected' : ''}>${{ pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Cartão de crédito', debito: 'Cartão de débito' }[f]}</option>`).join('')}${v.forma_pagamento === 'fiado' ? '<option value="fiado" selected>Fiado (na conta do cliente)</option>' : ''}</select></label>
         </div>
         ${novo ? `<label class="check"><input type="checkbox" name="enviar_confirmacao" ${CONFIG.agenda_confirmacao ? 'checked' : ''}> Mandar confirmação no WhatsApp</label>` : ''}
       </div>
@@ -342,12 +342,8 @@ function modalAgendamento(a, padrao = {}) {
 
   $$('[data-st]', f).forEach((b) => b.onclick = async () => {
     const st = b.dataset.st;
-    const body = { status: st };
-    if (st === 'concluido' && !f.pago.checked) {
-      body.pago = await confirmar('Atendimento concluído', `Marcar também como <b>pago</b> (${brl(a.valor)})?`, 'Sim, pago');
-      if (body.pago) body.forma_pagamento = f.forma_pagamento.value || 'dinheiro';
-    }
-    try { await api(`/agenda/${a.id}/status`, { method: 'POST', body }); fecharModal(); toast(NOME_STATUS[st] + ' ✓'); desenharAgenda(); }
+    if (st === 'concluido' && !f.pago.checked) return modalConcluir(a, f.forma_pagamento.value);
+    try { await api(`/agenda/${a.id}/status`, { method: 'POST', body: { status: st } }); fecharModal(); toast(NOME_STATUS[st] + ' ✓'); desenharAgenda(); }
     catch (err) { toast(err.message, true); }
   });
   const wa = $('#ag-wa');
@@ -360,6 +356,38 @@ function modalAgendamento(a, padrao = {}) {
   if (ex) ex.onclick = async () => {
     if (!(await confirmar('Excluir agendamento?', 'Ele some da agenda e do histórico. Para manter o registro, use “Cancelar horário”.', 'Excluir', true))) return;
     await api(`/agenda/${a.id}`, { method: 'DELETE' }); toast('Excluído'); desenharAgenda();
+  };
+}
+
+// ---------- Concluir atendimento: pago agora, pendurar (fiado) ou deixar em aberto ----------
+function modalConcluir(a, formaSugerida) {
+  const podeFiado = !!(a.cliente_id || a.telefone);
+  abrirModal(`<form id="f-cc">
+    <div class="modal-topo"><h2>Atendimento concluído</h2><button type="button" class="fechar" data-fechar>×</button></div>
+    <div class="modal-corpo">
+      <p><b>${esc(a.cliente_nome || '')}</b> · ${esc(a.servico_nome || 'atendimento')} · <b>${brl(a.valor)}</b></p>
+      <label class="check"><input type="radio" name="op" value="pago" checked> <b>Pagou agora</b></label>
+      <div style="margin:-2px 0 10px 24px" id="cc-forma"><select name="forma">${[['dinheiro', 'Dinheiro'], ['pix', 'Pix'], ['debito', 'Cartão de débito'], ['cartao', 'Cartão de crédito']].map(([k, n]) => `<option value="${k}" ${k === formaSugerida ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+      <label class="check ${podeFiado ? '' : 'muted'}"><input type="radio" name="op" value="fiado" ${podeFiado ? '' : 'disabled'}> <b>Pendurar na conta (fiado)</b>${podeFiado ? ': entra na próxima cobrança do cliente' : ': cadastre o WhatsApp do cliente para poder pendurar'}</label>
+      <label class="check"><input type="radio" name="op" value="aberto"> Ainda não pagou (resolvo depois)</label>
+      <p class="erro-txt" id="cc-erro"></p>
+    </div>
+    <div class="modal-rodape"><button type="button" class="btn" data-fechar>Cancelar</button><button class="btn verde">Concluir</button></div></form>`);
+  const f = $('#f-cc');
+  $$('input[name=op]', f).forEach((r) => r.onchange = () => $('#cc-forma').classList.toggle('hidden', f.op.value !== 'pago'));
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const op = f.op.value;
+    const body = { status: 'concluido' };
+    if (op === 'pago') { body.pago = true; body.forma_pagamento = f.forma.value; }
+    if (op === 'fiado') body.pendurar = true;
+    try {
+      const r = await api(`/agenda/${a.id}/status`, { method: 'POST', body });
+      fecharModal();
+      if (r.fiado) toast(r.fiado.anexado_em ? `Pendurado na conta de ${r.fiado.cliente}: entra na cobrança de ${brData(r.fiado.anexado_em)} ✓` : `Pendurado no fiado de ${r.fiado.cliente} ✓`);
+      else toast('Concluído ✓');
+      desenharAgenda();
+    } catch (err) { $('#cc-erro').textContent = err.message; }
   };
 }
 
@@ -485,27 +513,27 @@ async function pgComissoes(el) {
     </div></div>
     <div class="grade g4">
       <div class="cartao kpi"><div class="rotulo">Atendimentos</div><div class="valor">${t.atendimentos}</div><div class="det">${t.pendentes ? `${t.pendentes} ainda não concluído(s)` : 'concluídos no período'}</div></div>
-      <div class="cartao kpi"><div class="rotulo">Faturamento</div><div class="valor">${brl(t.faturamento)}</div><div class="det">recebido: ${brl(t.recebido)}</div></div>
+      <div class="cartao kpi"><div class="rotulo">Faturamento</div><div class="valor">${brl(t.faturamento)}</div><div class="det">${t.produtos ? `produtos ${brl(t.produtos)} · ` : ''}recebido: ${brl(t.recebido)}</div></div>
       <div class="cartao kpi alerta"><div class="rotulo">Comissões a pagar</div><div class="valor">${brl(t.comissao)}</div><div class="det">soma dos profissionais</div></div>
       <div class="cartao kpi ok"><div class="rotulo">Fica para a casa</div><div class="valor">${brl(t.casa)}</div><div class="det">faturamento − comissões</div></div>
     </div>
     <div class="cartao" style="margin-top:14px"><div class="tabela-wrap"><table>
-      <thead><tr><th>Profissional</th><th class="num">Atend.</th><th class="num">Faturamento</th><th class="num">Comissão</th><th class="num">Casa</th><th class="num">Faltas</th><th></th></tr></thead>
+      <thead><tr><th>Profissional</th><th class="num">Atend.</th><th class="num">Serviços</th><th class="num">Produtos</th><th class="num">Comissão</th><th class="num">Casa</th><th class="num">Faltas</th><th></th></tr></thead>
       <tbody>${r.profissionais.length ? r.profissionais.map((p) => `
         <tr><td><span class="ag-ponto" style="background:${esc(p.cor)}"></span><b>${esc(p.nome)}</b></td>
-          <td class="num">${p.atendimentos}</td><td class="num">${brl(p.faturamento)}</td>
+          <td class="num">${p.atendimentos}</td><td class="num">${brl(p.servicos)}</td><td class="num">${p.produtos ? brl(p.produtos) : '—'}</td>
           <td class="num"><b>${brl(p.comissao)}</b></td><td class="num">${brl(p.casa)}</td>
           <td class="num">${p.faltas || '—'}</td>
           <td class="num">${p.itens.length ? `<button class="btn mini" data-det="${p.profissional_id}">${COM.aberto[p.profissional_id] ? 'Ocultar' : 'Detalhes'}</button>` : ''}</td></tr>
-        ${COM.aberto[p.profissional_id] ? `<tr><td colspan="7" style="background:#fafcfd;padding:0"><table style="font-size:12.5px">
-          <thead><tr><th>Data</th><th>Cliente</th><th>Serviço</th><th class="num">Valor</th><th class="num">%</th><th class="num">Comissão</th><th>Pagamento</th></tr></thead><tbody>
-          ${p.itens.map((i) => `<tr><td>${brData(i.inicio.slice(0, 10))} ${i.inicio.slice(11)}</td><td>${esc(i.cliente || '')}</td><td>${esc(i.servico || '—')}</td>
+        ${COM.aberto[p.profissional_id] ? `<tr><td colspan="8" style="background:#fafcfd;padding:0"><table style="font-size:12.5px">
+          <thead><tr><th>Data</th><th>Cliente</th><th>Serviço / produto</th><th class="num">Valor</th><th class="num">%</th><th class="num">Comissão</th><th>Pagamento</th></tr></thead><tbody>
+          ${p.itens.map((i) => `<tr><td>${brData(i.inicio.slice(0, 10))} ${i.produto ? '' : i.inicio.slice(11)}</td><td>${esc(i.cliente || '')}</td><td>${i.produto ? '🧴 ' : ''}${esc(i.servico || '—')}</td>
             <td class="num">${brl(i.valor)}</td><td class="num">${i.pct}%</td><td class="num">${brl(i.comissao)}</td>
-            <td>${i.pago ? `<span class="tag pago">${esc({ pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Crédito', debito: 'Débito' }[i.forma] || 'Pago')}</span>` : '<span class="tag hoje">Não pago</span>'}</td></tr>`).join('')}
+            <td>${i.pago ? `<span class="tag pago">${esc({ pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Crédito', debito: 'Débito', fiado: 'Fiado pago' }[i.forma] || 'Pago')}</span>` : i.forma === 'fiado' ? '<span class="tag hoje">Fiado</span>' : '<span class="tag hoje">Não pago</span>'}</td></tr>`).join('')}
           </tbody></table></td></tr>` : ''}`).join('')
-        : '<tr><td colspan="7" class="vazio"><b>Nenhum atendimento concluído no período</b>A comissão entra quando o atendimento é marcado como “Concluído” na agenda.</td></tr>'}
+        : '<tr><td colspan="8" class="vazio"><b>Nenhum atendimento concluído no período</b>A comissão entra quando o atendimento é marcado como “Concluído” na agenda.</td></tr>'}
       </tbody></table></div></div>
-    <p class="muted pequeno" style="margin-top:10px">A comissão é calculada sobre o valor do atendimento no momento em que ele é concluído: usa o % do serviço, se tiver, ou o % do profissional. Mudar o percentual depois não altera atendimentos já concluídos.</p>`;
+    <p class="muted pequeno" style="margin-top:10px">Produtos vendidos entram na comissão de quem vendeu, com o % do produto. A comissão do atendimento é calculada sobre o valor no momento em que ele é concluído: usa o % do serviço, se tiver, ou o % do profissional. Mudar o percentual depois não altera atendimentos já concluídos.</p>`;
 
   $$('#com-per button').forEach((b) => b.onclick = () => { COM.periodo = b.dataset.p; if (b.dataset.p === 'outro') { $('#com-datas').classList.remove('hidden'); $$('#com-per button').forEach((x) => x.classList.toggle('sel', x === b)); } else rotear(); });
   const ok = $('#com-ok');
@@ -513,11 +541,11 @@ async function pgComissoes(el) {
   $$('[data-det]').forEach((b) => b.onclick = () => { COM.aberto[b.dataset.det] = !COM.aberto[b.dataset.det]; rotear(); });
   $('#com-imprimir').onclick = () => { r.profissionais.forEach((p) => COM.aberto[p.profissional_id] = true); rotear().then(() => setTimeout(() => window.print(), 300)); };
   $('#com-csv').onclick = () => {
-    const linhas = [['Profissional', 'Data', 'Hora', 'Cliente', 'Serviço', 'Valor', '% comissão', 'Comissão', 'Pago', 'Forma']];
-    for (const p of r.profissionais) for (const i of p.itens) linhas.push([p.nome, brData(i.inicio.slice(0, 10)), i.inicio.slice(11), i.cliente || '', i.servico || '', i.valor.toFixed(2).replace('.', ','), String(i.pct).replace('.', ','), i.comissao.toFixed(2).replace('.', ','), i.pago ? 'sim' : 'não', i.forma || '']);
+    const linhas = [['Profissional', 'Data', 'Hora', 'Cliente', 'Tipo', 'Serviço / produto', 'Valor', '% comissão', 'Comissão', 'Pago', 'Forma']];
+    for (const p of r.profissionais) for (const i of p.itens) linhas.push([p.nome, brData(i.inicio.slice(0, 10)), i.produto ? '' : i.inicio.slice(11), i.cliente || '', i.produto ? 'produto' : 'serviço', i.servico || '', i.valor.toFixed(2).replace('.', ','), String(i.pct).replace('.', ','), i.comissao.toFixed(2).replace('.', ','), i.pago ? 'sim' : 'não', i.forma || '']);
     linhas.push([]);
-    linhas.push(['Resumo', '', '', '', '', 'Faturamento', '', 'Comissão', 'Casa']);
-    for (const p of r.profissionais) linhas.push([p.nome, '', '', '', '', p.faturamento.toFixed(2).replace('.', ','), '', p.comissao.toFixed(2).replace('.', ','), p.casa.toFixed(2).replace('.', ',')]);
+    linhas.push(['Resumo', '', '', '', '', '', 'Faturamento', '', 'Comissão', 'Casa']);
+    for (const p of r.profissionais) linhas.push([p.nome, '', '', '', '', '', p.faturamento.toFixed(2).replace('.', ','), '', p.comissao.toFixed(2).replace('.', ','), p.casa.toFixed(2).replace('.', ',')]);
     const csv = '﻿' + linhas.map((l) => l.map((v) => /[;"\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(';')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));

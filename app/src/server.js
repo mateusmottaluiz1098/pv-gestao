@@ -7,6 +7,8 @@ const wa = require('./whatsapp');
 const C = require('./cobrancas');
 const USR = require('./usuarios');
 const AG = require('./agenda');
+const FIN = require('./financeiro');
+const REL = require('./relacionamento');
 const U = require('./util');
 
 const app = express();
@@ -168,6 +170,9 @@ app.get('/marca/logo', async (req, res) => {
   res.end(Buffer.from(logo.base64, 'base64'));
 });
 
+// ---------- Agendamento online (público) ----------
+REL.rotasPublicas(app);
+
 // ---------- Proteção das rotas da API ----------
 app.use('/api', (req, res, next) => {
   usuarioDaSessao(req).then((u) => {
@@ -191,7 +196,16 @@ function pode(perm) {
   };
 }
 
-app.get('/api/me', (req, res) => res.json({ ...USR.publico(req.usuario), lista_permissoes: USR.PERMISSOES }));
+app.get('/api/me', rota(async (req, res) => {
+  // guarda o endereço público do sistema (usado no link de agendamento das mensagens)
+  const host = req.get('host');
+  if (host && !/^(localhost|127\.|\[::1\])/.test(host)) {
+    const url = `${req.protocol}://${host}`;
+    const c = await cfg.obter();
+    if (c._url_publica !== url) await cfg.salvarInterno('url_publica', url);
+  }
+  res.json({ ...USR.publico(req.usuario), lista_permissoes: USR.PERMISSOES });
+}));
 
 app.post('/api/me/senha', rota(async (req, res) => {
   const u = await USR.trocarPropriaSenha(req.usuario.id, req.body.atual, req.body.nova);
@@ -210,6 +224,8 @@ app.put('/api/usuarios/:id', pode('usuarios'), rota(async (req, res) => {
 app.delete('/api/usuarios/:id', pode('usuarios'), rota(async (req, res) => { await USR.excluir(req.params.id, req.usuario); res.json({ ok: true }); }));
 
 AG.rotas(app, { rota, pode });
+FIN.rotas(app, { rota, pode });
+REL.rotas(app, { rota, pode });
 
 // ---------- Painel ----------
 app.get('/api/painel', rota(async (req, res) => {
@@ -224,7 +240,7 @@ app.get('/api/painel', rota(async (req, res) => {
     q("SELECT COUNT(*)::int n FROM comprovantes WHERE status='pendente'"),
     q("SELECT COUNT(*)::int n FROM mensagens WHERE direcao='saida' AND status='enviado' AND (criado_em AT TIME ZONE 'America/Sao_Paulo')::date=$1", [hoje]),
   ]);
-  const previstoMes = await q("SELECT COALESCE(SUM(valor),0) v FROM cobrancas WHERE competencia=$1 AND status<>'cancelado'", [mes]);
+  const previstoMes = await q("SELECT COALESCE(SUM(valor),0) v FROM cobrancas WHERE competencia >= $1 AND competencia < ($1::date + interval '1 month') AND status<>'cancelado'", [mes]);
   const fila = await C.montarFila();
   const c = await cfg.obter();
   const etapas = Object.fromEntries((c.regua || []).map((e) => [e.id, e]));
@@ -251,26 +267,40 @@ app.get('/api/painel', rota(async (req, res) => {
 }));
 
 // ---------- Clientes ----------
+const FORMAS_CLIENTE = ['mensal', 'semanal', 'quinzenal', 'carne', 'avulso'];
 function validarCliente(b) {
   const nome = String(b.nome || '').trim();
   if (!nome) throw erro(400, 'Informe o nome');
   const telefone = U.normalizarTelefone(b.telefone);
   if (!U.telefoneValido(telefone)) throw erro(400, 'Telefone inválido. Use DDD + número, ex.: 51 99999-9999');
-  const valor = Number(String(b.valor).replace(',', '.'));
-  if (!(valor > 0)) throw erro(400, 'Informe o valor');
-  const dia = parseInt(b.dia_vencimento, 10);
-  if (!(dia >= 1 && dia <= 31)) throw erro(400, 'Dia de vencimento inválido');
-  const forma = b.forma === 'carne' ? 'carne' : 'mensal';
+  const forma = FORMAS_CLIENTE.includes(b.forma) ? b.forma : 'mensal';
+  let valor = Number(String(b.valor ?? '').replace(',', '.')) || 0;
+  if (forma === 'avulso') valor = Math.max(0, valor);
+  else if (!(valor > 0)) throw erro(400, 'Informe o valor');
   const parcelas = forma === 'carne' ? parseInt(b.parcelas_total, 10) : null;
   if (forma === 'carne' && !(parcelas > 0)) throw erro(400, 'Informe a quantidade de parcelas do carnê');
-  let primeiro = b.primeiro_vencimento;
-  if (!primeiro || !/^\d{4}-\d{2}-\d{2}$/.test(primeiro)) {
-    const h = U.hoje();
-    const [y, m, d] = h.split('-').map(Number);
-    primeiro = d <= dia ? U.vencimentoNoMes(y, m, dia) : (m === 12 ? U.vencimentoNoMes(y + 1, 1, dia) : U.vencimentoNoMes(y, m + 1, dia));
+  const h = U.hoje();
+  let primeiro = /^\d{4}-\d{2}-\d{2}$/.test(b.primeiro_vencimento || '') ? b.primeiro_vencimento : null;
+  let dia = parseInt(b.dia_vencimento, 10);
+  let diaSemana = null;
+  if (forma === 'semanal' || forma === 'quinzenal') {
+    diaSemana = parseInt(b.dia_semana, 10);
+    if (primeiro) diaSemana = U.parseData(primeiro).getUTCDay();
+    if (!(diaSemana >= 0 && diaSemana <= 6)) throw erro(400, 'Escolha o dia da semana do vencimento');
+    if (!primeiro) primeiro = U.somarDias(h, (diaSemana - U.parseData(h).getUTCDay() + 7) % 7); // próximo dia da semana (pode ser hoje)
+    dia = Number(primeiro.slice(8, 10));
+  } else if (forma === 'avulso') {
+    dia = 1;
+    primeiro = primeiro || h;
+  } else {
+    if (!(dia >= 1 && dia <= 31)) throw erro(400, 'Dia de vencimento inválido');
+    if (!primeiro) {
+      const [y, m, d] = h.split('-').map(Number);
+      primeiro = d <= dia ? U.vencimentoNoMes(y, m, dia) : (m === 12 ? U.vencimentoNoMes(y + 1, 1, dia) : U.vencimentoNoMes(y, m + 1, dia));
+    }
   }
   return {
-    nome, telefone, valor, forma, dia_vencimento: dia, primeiro_vencimento: primeiro, parcelas_total: parcelas,
+    nome, telefone, valor, forma, dia_vencimento: dia, dia_semana: diaSemana, primeiro_vencimento: primeiro, parcelas_total: parcelas,
     identificacao: b.identificacao || null, endereco: b.endereco || null, observacoes: b.observacoes || null,
     ativo: b.ativo !== false, pausado: !!b.pausado,
   };
@@ -284,7 +314,9 @@ app.get('/api/clientes', rota(async (req, res) => {
          WHERE cliente_id=cl.id AND status='aberto' ORDER BY vencimento LIMIT 1) x) AS proxima,
       (SELECT COUNT(*)::int FROM cobrancas WHERE cliente_id=cl.id AND status='aberto' AND vencimento < $1) AS atrasadas,
       (SELECT COALESCE(SUM(valor),0) FROM cobrancas WHERE cliente_id=cl.id AND status='aberto' AND vencimento < $1) AS valor_atrasado,
-      (SELECT status FROM cobrancas WHERE cliente_id=cl.id AND competencia=$2) AS status_mes,
+      (SELECT CASE WHEN bool_or(status='aberto') THEN 'aberto' WHEN bool_or(status='pago') THEN 'pago' END FROM cobrancas
+         WHERE cliente_id=cl.id AND competencia >= $2 AND competencia < ($2::date + interval '1 month')) AS status_mes,
+      (SELECT COALESCE(SUM(valor),0) FROM consumos WHERE cliente_id=cl.id AND cobranca_id IS NULL AND status='pendente') AS fiado_pendente,
       (SELECT MAX(criado_em) FROM mensagens WHERE cliente_id=cl.id AND direcao='saida' AND status='enviado') AS ultima_msg
     FROM clientes cl ORDER BY cl.ativo DESC, cl.nome`, [hoje, hoje.slice(0, 7) + '-01']);
   res.json(rows);
@@ -301,9 +333,9 @@ app.get('/api/clientes/:id', rota(async (req, res) => {
 app.post('/api/clientes', pode('clientes'), rota(async (req, res) => {
   const c = validarCliente(req.body);
   const { rows } = await q(
-    `INSERT INTO clientes (nome, telefone, valor, forma, dia_vencimento, primeiro_vencimento, parcelas_total, identificacao, endereco, observacoes, ativo, pausado)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-    [c.nome, c.telefone, c.valor, c.forma, c.dia_vencimento, c.primeiro_vencimento, c.parcelas_total, c.identificacao, c.endereco, c.observacoes, c.ativo, c.pausado]
+    `INSERT INTO clientes (nome, telefone, valor, forma, dia_vencimento, primeiro_vencimento, parcelas_total, identificacao, endereco, observacoes, ativo, pausado, dia_semana)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    [c.nome, c.telefone, c.valor, c.forma, c.dia_vencimento, c.primeiro_vencimento, c.parcelas_total, c.identificacao, c.endereco, c.observacoes, c.ativo, c.pausado, c.dia_semana]
   );
   await C.gerarCobrancas(rows[0].id);
   res.json(rows[0]);
@@ -311,13 +343,14 @@ app.post('/api/clientes', pode('clientes'), rota(async (req, res) => {
 
 app.put('/api/clientes/:id', pode('clientes'), rota(async (req, res) => {
   const c = validarCliente(req.body);
+  const { rows: antes } = await q('SELECT * FROM clientes WHERE id=$1', [req.params.id]);
+  if (!antes[0]) throw erro(404, 'Cliente não encontrado');
   const { rows } = await q(
     `UPDATE clientes SET nome=$1, telefone=$2, valor=$3, forma=$4, dia_vencimento=$5, primeiro_vencimento=$6, parcelas_total=$7,
-       identificacao=$8, endereco=$9, observacoes=$10, ativo=$11, pausado=$12 WHERE id=$13 RETURNING *`,
-    [c.nome, c.telefone, c.valor, c.forma, c.dia_vencimento, c.primeiro_vencimento, c.parcelas_total, c.identificacao, c.endereco, c.observacoes, c.ativo, c.pausado, req.params.id]
+       identificacao=$8, endereco=$9, observacoes=$10, ativo=$11, pausado=$12, dia_semana=$14 WHERE id=$13 RETURNING *`,
+    [c.nome, c.telefone, c.valor, c.forma, c.dia_vencimento, c.primeiro_vencimento, c.parcelas_total, c.identificacao, c.endereco, c.observacoes, c.ativo, c.pausado, req.params.id, c.dia_semana]
   );
-  if (!rows[0]) throw erro(404, 'Cliente não encontrado');
-  await C.ajustarCobrancasFuturas(rows[0]);
+  await C.ajustarCobrancasFuturas(rows[0], antes[0]);
   await C.gerarCobrancas(rows[0].id);
   res.json(rows[0]);
 }));
@@ -332,11 +365,11 @@ app.get('/api/cobrancas', rota(async (req, res) => {
   await C.gerarCobrancas();
   const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : U.hoje().slice(0, 7);
   const { rows } = await q(`
-    SELECT cb.*, cl.nome, cl.telefone, cl.parcelas_total, cl.identificacao,
+    SELECT cb.*, cl.nome, cl.telefone, cl.parcelas_total, cl.identificacao, cl.forma,
       (SELECT MAX(criado_em) FROM mensagens WHERE cobranca_id=cb.id AND direcao='saida' AND status='enviado') AS ultima_msg,
       (SELECT COUNT(*)::int FROM mensagens WHERE cobranca_id=cb.id AND direcao='saida' AND status='enviado') AS qtd_msgs
     FROM cobrancas cb JOIN clientes cl ON cl.id=cb.cliente_id
-    WHERE cb.competencia = $1 ORDER BY cb.vencimento, cl.nome`, [mes + '-01']);
+    WHERE cb.competencia >= $1 AND cb.competencia < ($1::date + interval '1 month') ORDER BY cb.vencimento, cl.nome`, [mes + '-01']);
   const hoje = U.hoje();
   const resumo = { previsto: 0, recebido: 0, aberto: 0, atrasado: 0, qtd: rows.length, pagos: 0 };
   for (const r of rows) {
@@ -363,7 +396,7 @@ app.post('/api/cobrancas/:id/pagar', pode('pagamentos'), rota(async (req, res) =
 }));
 
 app.post('/api/cobrancas/:id/desfazer', pode('pagamentos'), rota(async (req, res) => {
-  await q("UPDATE cobrancas SET status='aberto', pago_em=NULL, pago_valor=NULL, forma_pagamento=NULL, pago_por=NULL WHERE id=$1", [req.params.id]);
+  await C.desfazerPagamento(req.params.id);
   res.json({ ok: true });
 }));
 
@@ -505,7 +538,9 @@ app.put('/api/config', rota(async (req, res) => {
     const dias = b.regua.map((e) => e.dias);
     if (new Set(dias).size !== dias.length) throw erro(400, 'Duas etapas da régua não podem ter o mesmo dia');
   }
-  for (const k of ['intervalo_min', 'intervalo_max', 'limite_diario', 'tolerancia_dias', 'agenda_intervalo', 'agenda_lembrete_horas']) if (k in b) b[k] = Math.max(0, parseInt(b[k], 10) || 0);
+  for (const k of ['intervalo_min', 'intervalo_max', 'limite_diario', 'tolerancia_dias', 'agenda_intervalo', 'agenda_lembrete_horas', 'retorno_dias', 'retorno_limite', 'online_antecedencia_min', 'online_dias']) if (k in b) b[k] = Math.max(0, parseInt(b[k], 10) || 0);
+  if ('retorno_dias' in b && b.retorno_dias < 7) throw erro(400, 'O retorno precisa ser de pelo menos 7 dias');
+  if ('online_dias' in b) b.online_dias = Math.min(90, Math.max(1, b.online_dias));
   if (b.intervalo_min > b.intervalo_max) throw erro(400, 'Intervalo mínimo maior que o máximo');
   if ('tema' in b && !cfg.TEMAS.includes(b.tema)) throw erro(400, 'Tema inválido');
   if ('sistema_nome' in b) {
@@ -529,7 +564,7 @@ app.delete('/api/marca/logo', pode('personalizacao'), rota(async (req, res) => {
   res.json({ ok: true });
 }));
 app.post('/api/config/previa', rota(async (req, res) => {
-  const fake = { id: 0, nome: 'Maria da Silva', telefone: '51999999999', parcelas_total: 10 };
+  const fake = { id: 0, nome: 'Maria da Silva', telefone: '51999999999', parcelas_total: 10, forma: 'mensal' };
   const cb = { id: 0, valor: 180, vencimento: U.somarDias(U.hoje(), -(Number(req.body.dias) || 0)), competencia: U.hoje().slice(0, 7) + '-01', numero_parcela: 3 };
   res.json({ texto: await C.renderizar(req.body.modelo, fake, cb) });
 }));
@@ -550,20 +585,22 @@ app.get('/api/exportar/clientes.csv', rota(async (req, res) => {
 }));
 app.get('/api/exportar/cobrancas.csv', rota(async (req, res) => {
   const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : U.hoje().slice(0, 7);
-  const { rows } = await q(`SELECT cb.*, cl.nome, cl.telefone FROM cobrancas cb JOIN clientes cl ON cl.id=cb.cliente_id WHERE competencia=$1 ORDER BY vencimento`, [mes + '-01']);
+  const { rows } = await q(`SELECT cb.*, cl.nome, cl.telefone, cl.forma, cl.parcelas_total FROM cobrancas cb JOIN clientes cl ON cl.id=cb.cliente_id
+    WHERE competencia >= $1 AND competencia < ($1::date + interval '1 month') ORDER BY vencimento`, [mes + '-01']);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="cobrancas-${mes}.csv"`);
-  res.send(csv([['Cliente', 'Telefone', 'Vencimento', 'Valor', 'Parcela', 'Status', 'Pago em', 'Valor pago'],
-    ...rows.map((r) => [r.nome, r.telefone, U.brData(r.vencimento), String(r.valor).replace('.', ','), r.numero_parcela, r.status, U.brData(r.pago_em), r.pago_valor != null ? String(r.pago_valor).replace('.', ',') : ''])]));
+  res.send(csv([['Cliente', 'Telefone', 'Referente a', 'Vencimento', 'Valor', 'Status', 'Pago em', 'Valor pago', 'Forma'],
+    ...rows.map((r) => [r.nome, r.telefone, C.descricaoCobranca(r, r), U.brData(r.vencimento), String(r.valor).replace('.', ','), r.status, U.brData(r.pago_em), r.pago_valor != null ? String(r.pago_valor).replace('.', ',') : '', r.forma_pagamento || ''])]));
 }));
 app.get('/api/exportar/backup.json', pode('configuracoes'), rota(async (req, res) => {
   const tabelas = {};
-  for (const t of ['config', 'clientes', 'cobrancas', 'mensagens']) tabelas[t] = (await q(`SELECT * FROM ${t}`)).rows;
+  for (const t of ['config', 'clientes', 'cobrancas', 'mensagens', 'consumos', 'produtos', 'vendas', 'caixa_movimentos']) tabelas[t] = (await q(`SELECT * FROM ${t}`)).rows;
   res.setHeader('Content-Disposition', `attachment; filename="backup-cobrancas-${U.hoje()}.json"`);
   res.json({ versao: 1, gerado_em: new Date().toISOString(), ...tabelas });
 }));
 
 // ---------- Arquivos da interface ----------
+app.get('/agendar', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'agendar.html')));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
@@ -571,7 +608,10 @@ const PORTA = Number(process.env.PORT || 3000);
 migrar().then(async () => {
   await USR.iniciar(SENHA_INICIAL);
   await AG.iniciar();
+  await FIN.iniciar();
+  await REL.iniciar();
   setInterval(() => AG.tickLembretes(), 60000);
+  setInterval(() => REL.tickRetorno(), 60000);
   await C.gerarCobrancas();
   C.iniciarAgendador();
   app.listen(PORTA, () => console.log(`Sistema de cobranças rodando na porta ${PORTA}`));

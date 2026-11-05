@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agendar horário</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" id="favicon" href="">
+  <style>
+    body { background: var(--fundo); }
+    .ag-pub { max-width: 560px; margin: 0 auto; padding: 18px 16px 40px; }
+    .ag-pub-topo { display: flex; align-items: center; gap: 12px; margin: 6px 0 18px; }
+    .ag-pub-topo .logo-marca { width: 46px; height: 46px; border-radius: 12px; background: var(--azul-3); color: #fff; font-size: 22px; }
+    .ag-pub-topo .logo-marca img { width: 100%; height: 100%; object-fit: cover; }
+    .ag-pub-topo h1 { font-size: 20px; margin: 0; }
+    .passo { background: #fff; border: 1px solid var(--borda); border-radius: 14px; padding: 16px; margin-bottom: 12px; box-shadow: var(--sombra); }
+    .passo h2 { font-size: 15px; margin: 0 0 12px; display: flex; gap: 8px; align-items: center; }
+    .passo h2 .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--azul-3); color: #fff; font-size: 12px; }
+    .passo.inativo { opacity: .5; pointer-events: none; }
+    .opcoes { display: grid; gap: 8px; }
+    .op { border: 1.5px solid var(--borda); background: #fff; border-radius: 11px; padding: 11px 13px; text-align: left; font: inherit; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; align-items: center; color: var(--texto); }
+    .op small { color: var(--muted); font-weight: 400; }
+    .op.sel { border-color: var(--azul-3); background: var(--azul-claro); }
+    .dias { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+    .dia { flex: 0 0 auto; width: 62px; border: 1.5px solid var(--borda); background: #fff; border-radius: 11px; padding: 8px 0; text-align: center; font: inherit; cursor: pointer; color: var(--texto); }
+    .dia b { display: block; font-size: 18px; }
+    .dia small { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    .dia.sel { border-color: var(--azul-3); background: var(--azul-claro); }
+    .dia:disabled { opacity: .35; cursor: default; }
+    .horas { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; margin-top: 12px; }
+    .hora { border: 1.5px solid var(--borda); background: #fff; border-radius: 9px; padding: 9px 0; font: inherit; font-weight: 600; cursor: pointer; color: var(--texto); }
+    .hora.sel { border-color: var(--azul-3); background: var(--azul-3); color: #fff; }
+    .resumo-ag { background: var(--azul-claro); border-radius: 10px; padding: 12px 14px; font-size: 14px; margin-bottom: 12px; line-height: 1.6; }
+    .ok-final { text-align: center; padding: 30px 16px; }
+    .ok-final .grande { font-size: 54px; }
+    .escondido { position: absolute; left: -9999px; }
+    .btn.largo { width: 100%; justify-content: center; padding: 13px; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="ag-pub" id="raiz"><p class="muted">Carregando…</p></div>
+  <script src="/agendar.js"></script>
+</body>
+</html>

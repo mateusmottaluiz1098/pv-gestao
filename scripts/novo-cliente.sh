@@ -38,6 +38,7 @@ TZ=America/Sao_Paulo
 PORT=3000
 DB_POOL_MAX=5
 TRUST_PROXY=1
+URL_PUBLICA=https://$SLUG.$BASE_DOMINIO
 EOF
 chmod 600 "clientes/$SLUG.env"
 

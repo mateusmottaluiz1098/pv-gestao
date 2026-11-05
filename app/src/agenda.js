@@ -50,6 +50,8 @@ ALTER TABLE servicos ADD COLUMN IF NOT EXISTS comissao_pct NUMERIC(5,2);
 ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS comissao_pct NUMERIC(5,2);
 ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS comissao_valor NUMERIC(12,2);
 ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS concluido_em TIMESTAMPTZ;
+ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS pago_em TIMESTAMPTZ;
+ALTER TABLE agendamentos ADD COLUMN IF NOT EXISTS origem TEXT;
 CREATE INDEX IF NOT EXISTS agendamentos_prof_idx ON agendamentos (profissional_id, inicio);
 `;
 
@@ -200,6 +202,38 @@ async function aplicarComissao(id) {
        FROM profissionais p
       WHERE p.id = a.profissional_id AND a.id = $1 AND a.status = 'concluido'`, [id]);
   await q("UPDATE agendamentos SET comissao_pct = NULL, comissao_valor = NULL, concluido_em = NULL WHERE id = $1 AND status <> 'concluido'", [id]);
+  // guarda quando foi pago (usado no caixa do dia)
+  await q('UPDATE agendamentos SET pago_em = CASE WHEN pago THEN COALESCE(pago_em, now()) ELSE NULL END WHERE id = $1', [id]);
+}
+
+// horários livres de cada profissional num dia (dur = duração em minutos; profId opcional)
+async function horariosLivres(data, dur, profId, antecedenciaMin = 0) {
+  const { rows: ps } = await q('SELECT * FROM profissionais WHERE ativo AND ($1::int IS NULL OR id = $1) ORDER BY ordem, nome', [profId || null]);
+  const { rows: ags } = await q(
+    `SELECT profissional_id, to_char(inicio AT TIME ZONE '${TZ}','HH24:MI') i, to_char(fim AT TIME ZONE '${TZ}','HH24:MI') f
+       FROM agendamentos WHERE status NOT IN ('cancelado','faltou')
+        AND inicio >= ($1::date)::timestamp AT TIME ZONE '${TZ}' AND inicio < (($1::date + 1)::timestamp) AT TIME ZONE '${TZ}'`, [data]);
+  const c = await cfg.obter();
+  const passo = Number(c.agenda_intervalo) || 30;
+  const dow = U.parseData(data).getUTCDay();
+  const toMin = (h) => { const [a, b] = h.split(':').map(Number); return a * 60 + b; };
+  const toH = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const hoje = U.hoje();
+  if (data < hoje) return ps.map((p) => ({ profissional_id: p.id, nome: p.nome, horarios: [] }));
+  const minimo = data === hoje ? toMin(U.horaAgora()) + antecedenciaMin : 0;
+  return ps.map((p) => {
+    const e = p.expediente || {};
+    if (!(e.dias || []).includes(dow)) return { profissional_id: p.id, nome: p.nome, horarios: [] };
+    const ocup = ags.filter((a) => a.profissional_id === p.id).map((a) => [toMin(a.i), toMin(a.f)]);
+    if (e.almoco_inicio && e.almoco_fim) ocup.push([toMin(e.almoco_inicio), toMin(e.almoco_fim)]);
+    const livres = [];
+    for (let m = toMin(e.inicio); m + dur <= toMin(e.fim); m += passo) {
+      if (m < minimo) continue;
+      if (ocup.some(([a, b]) => m < b && m + dur > a)) continue;
+      livres.push(toH(m));
+    }
+    return { profissional_id: p.id, nome: p.nome, horarios: livres };
+  });
 }
 
 // ---------- Rotas ----------
@@ -364,7 +398,13 @@ function rotas(app, { rota, pode }) {
     p.push(req.params.id);
     await q(`UPDATE agendamentos SET ${sets.join(',')} WHERE id=$${p.length}`, p);
     await aplicarComissao(req.params.id);
-    res.json(await buscar(req.params.id));
+    let fiado = null;
+    if (b.pendurar) {
+      const FIN = require('./financeiro');
+      const r = await FIN.pendurarAgendamento(req.params.id, req.usuario.nome);
+      fiado = { cliente: r.cliente.nome, anexado_em: r.anexado_em };
+    }
+    res.json({ ...(await buscar(req.params.id)), fiado });
   }));
   app.post('/api/agenda/:id/whatsapp', pode('agenda'), rota(async (req, res) => {
     const ag = await buscar(req.params.id);
@@ -406,8 +446,21 @@ function rotas(app, { rota, pode }) {
       } else if (a.status === 'faltou') r.faltas++;
       else if (a.status === 'agendado' || a.status === 'confirmado') r.pendentes++;
     }
-    const lista = Object.values(porProf).map((r) => ({ ...r, faturamento: +r.faturamento.toFixed(2), comissao: +r.comissao.toFixed(2), casa: +(r.faturamento - r.comissao).toFixed(2), recebido: +r.recebido.toFixed(2) }));
-    const tot = lista.reduce((t, r) => ({ atendimentos: t.atendimentos + r.atendimentos, faturamento: t.faturamento + r.faturamento, comissao: t.comissao + r.comissao, casa: t.casa + r.casa, recebido: t.recebido + r.recebido, pendentes: t.pendentes + r.pendentes }), { atendimentos: 0, faturamento: 0, comissao: 0, casa: 0, recebido: 0, pendentes: 0 });
+    // produtos vendidos (entram no faturamento e na comissão do profissional)
+    const { rows: vds } = await q(
+      `SELECT v.*, p.nome AS profissional_nome, p.cor FROM vendas v JOIN profissionais p ON p.id = v.profissional_id
+        WHERE v.data BETWEEN $1 AND $2 ORDER BY v.data, v.criado_em`, [de, ate]);
+    for (const v of vds) {
+      const k = v.profissional_id;
+      const r = porProf[k] || (porProf[k] = { profissional_id: k, nome: v.profissional_nome, cor: v.cor, atendimentos: 0, faturamento: 0, comissao: 0, recebido: 0, faltas: 0, pendentes: 0, itens: [] });
+      r.produtos = (r.produtos || 0) + Number(v.valor_total);
+      r.faturamento += Number(v.valor_total);
+      r.comissao += Number(v.comissao_valor);
+      if (v.forma_pagamento !== 'fiado') r.recebido += Number(v.valor_total);
+      r.itens.push({ id: 'v' + v.id, produto: true, inicio: v.data + 'T--:--', cliente: v.cliente_nome, servico: `${v.quantidade > 1 ? v.quantidade + 'x ' : ''}${v.descricao}`, valor: Number(v.valor_total), pct: Number(v.comissao_pct), comissao: Number(v.comissao_valor), pago: v.forma_pagamento !== 'fiado', forma: v.forma_pagamento });
+    }
+    const lista = Object.values(porProf).map((r) => ({ ...r, produtos: +(r.produtos || 0).toFixed(2), servicos: +(r.faturamento - (r.produtos || 0)).toFixed(2), faturamento: +r.faturamento.toFixed(2), comissao: +r.comissao.toFixed(2), casa: +(r.faturamento - r.comissao).toFixed(2), recebido: +r.recebido.toFixed(2) }));
+    const tot = lista.reduce((t, r) => ({ atendimentos: t.atendimentos + r.atendimentos, faturamento: t.faturamento + r.faturamento, produtos: t.produtos + r.produtos, comissao: t.comissao + r.comissao, casa: t.casa + r.casa, recebido: t.recebido + r.recebido, pendentes: t.pendentes + r.pendentes }), { atendimentos: 0, faturamento: 0, produtos: 0, comissao: 0, casa: 0, recebido: 0, pendentes: 0 });
     res.json({ de, ate, totais: tot, profissionais: lista });
   }));
 
@@ -415,31 +468,7 @@ function rotas(app, { rota, pode }) {
   app.get('/api/agenda/livres', rota(async (req, res) => {
     const data = /^\d{4}-\d{2}-\d{2}$/.test(req.query.data || '') ? req.query.data : U.hoje();
     const dur = parseInt(req.query.duracao, 10) || 30;
-    const { rows: ps } = await q('SELECT * FROM profissionais WHERE ativo AND ($1::int IS NULL OR id = $1) ORDER BY ordem, nome', [req.query.profissional_id ? parseInt(req.query.profissional_id, 10) : null]);
-    const { rows: ags } = await q(
-      `SELECT profissional_id, to_char(inicio AT TIME ZONE '${TZ}','HH24:MI') i, to_char(fim AT TIME ZONE '${TZ}','HH24:MI') f
-         FROM agendamentos WHERE status NOT IN ('cancelado','faltou')
-          AND inicio >= ($1::date)::timestamp AT TIME ZONE '${TZ}' AND inicio < (($1::date + 1)::timestamp) AT TIME ZONE '${TZ}'`, [data]);
-    const c = await cfg.obter();
-    const passo = Number(c.agenda_intervalo) || 30;
-    const dow = U.parseData(data).getUTCDay();
-    const agora = data === U.hoje() ? U.horaAgora() : '00:00';
-    const toMin = (h) => { const [a, b] = h.split(':').map(Number); return a * 60 + b; };
-    const toH = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-    const out = ps.map((p) => {
-      const e = p.expediente || {};
-      if (!(e.dias || []).includes(dow)) return { profissional_id: p.id, nome: p.nome, horarios: [] };
-      const ocup = ags.filter((a) => a.profissional_id === p.id).map((a) => [toMin(a.i), toMin(a.f)]);
-      if (e.almoco_inicio && e.almoco_fim) ocup.push([toMin(e.almoco_inicio), toMin(e.almoco_fim)]);
-      const livres = [];
-      for (let m = toMin(e.inicio); m + dur <= toMin(e.fim); m += passo) {
-        if (m < toMin(agora)) continue;
-        if (ocup.some(([a, b]) => m < b && m + dur > a)) continue;
-        livres.push(toH(m));
-      }
-      return { profissional_id: p.id, nome: p.nome, horarios: livres };
-    });
-    res.json(out);
+    res.json(await horariosLivres(data, dur, req.query.profissional_id ? parseInt(req.query.profissional_id, 10) : null));
   }));
 }
 
@@ -463,4 +492,4 @@ async function resumoHoje() {
   return { ...rows[0], proximos: prox, usa_agenda: tem[0].n > 0 };
 }
 
-module.exports = { iniciar, rotas, tickLembretes, tratarResposta, resumoHoje, STATUS };
+module.exports = { iniciar, rotas, tickLembretes, tratarResposta, resumoHoje, STATUS, horariosLivres, buscar, enviarMsg };

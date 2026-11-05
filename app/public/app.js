@@ -52,6 +52,25 @@ function confirmar(titulo, texto, botao = 'Confirmar', perigo = false) {
   });
 }
 
+const DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+const NOME_FORMA_CLI = { mensal: 'Mensal', semanal: 'Semanal', quinzenal: 'Quinzenal', carne: 'Carnê', avulso: 'Só avulso' };
+const NOME_PAGTO = { pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Crédito', debito: 'Débito', transferencia: 'Transferência', boleto: 'Boleto', fiado: 'Fiado' };
+// "Forma" do cliente em texto curto (lista e ficha)
+function formaCliente(c) {
+  if (c.forma === 'carne') return `Carnê (${c.parcelas_total}x) · dia ${c.dia_vencimento}`;
+  if (c.forma === 'semanal' || c.forma === 'quinzenal') return `${NOME_FORMA_CLI[c.forma]} · ${DIAS_SEMANA[c.dia_semana ?? new Date(c.primeiro_vencimento + 'T12:00').getDay()]}`;
+  if (c.forma === 'avulso') return 'Só avulso / fiado';
+  return `Mensal · dia ${c.dia_vencimento}`;
+}
+// "referente a" de uma cobrança
+function refCobranca(cb, forma) {
+  if (cb.descricao) return cb.descricao;
+  if (cb.tipo === 'avulsa') return 'Consumo avulso';
+  if (forma === 'semanal') return `Semana de ${brData(cb.vencimento).slice(0, 5)}`;
+  if (forma === 'quinzenal') return `Quinzena de ${brData(cb.vencimento).slice(0, 5)}`;
+  return `${MESES[Number(cb.competencia.slice(5, 7)) - 1].slice(0, 3)}/${cb.competencia.slice(0, 4)}`;
+}
+
 function statusCobranca(cb) {
   if (cb.status === 'pago') return '<span class="tag pago">Pago</span>';
   if (cb.status === 'cancelado') return '<span class="tag">Cancelado</span>';
@@ -106,6 +125,7 @@ const PAGINAS = {
   painel: ['Visão geral', pgPainel],
   agenda: ['Agenda', pgAgenda],
   comissoes: ['Comissões', pgComissoes, 'financeiro'],
+  caixa: ['Caixa do dia', pgCaixa, 'financeiro'],
   clientes: ['Clientes', pgClientes],
   cobrancas: ['Cobranças', pgCobrancas],
   comprovantes: ['Comprovantes', pgComprovantes],
@@ -138,6 +158,8 @@ const ACOES_PERM = {
   '#rodar-fila': 'envios', '#parar-fila': 'envios', '#enviar-agora': 'envios',
   '#ag-novo': 'agenda', '#ag-com': 'financeiro', '#ag-prof': 'agenda_config', '#ag-serv': 'agenda_config', '.ag-acao': 'agenda',
   '#wa-conectar': 'whatsapp', '#wa-sair': 'whatsapp', '#wa-teste': 'whatsapp',
+  '#lancar-consumo': 'pagamentos', '#cobrar-fiado': 'pagamentos', '[data-del-consumo]': 'pagamentos',
+  '#cx-venda': 'pagamentos', '[data-del-venda]': 'pagamentos', '#cx-mov': 'financeiro', '[data-del-mov]': 'financeiro', '#cx-prod': 'agenda_config',
 };
 function aplicarPermissoes(raiz) {
   for (const [sel, perm] of Object.entries(ACOES_PERM)) {
@@ -325,12 +347,12 @@ async function pgClientes(el) {
       else if (c.proxima) sit = statusCobranca(c.proxima);
       else sit = '<span class="tag pago">Em dia</span>';
       if (c.pausado) sit += ' <span class="tag pausado">Régua pausada</span>';
-      const prox = c.proxima ? `${brData(c.proxima.vencimento)}${c.proxima.numero_parcela ? ` · ${c.proxima.numero_parcela}/${c.parcelas_total}` : ''}` : '—';
+      const prox = c.proxima ? `${brData(c.proxima.vencimento)}${c.proxima.numero_parcela ? ` · ${c.proxima.numero_parcela}/${c.parcelas_total}` : ''}${Number(c.proxima.valor) !== Number(c.valor) ? `<div class="sub2">${brl(c.proxima.valor)}</div>` : ''}` : '—';
       return `<tr>
         <td><a href="#" data-ver="${c.id}"><b>${esc(c.nome)}</b></a><div class="sub2">${esc(c.identificacao || '')}</div></td>
         <td>${fone(c.telefone)}</td>
-        <td class="num">${brl(c.valor)}</td>
-        <td>${c.forma === 'carne' ? `Carnê (${c.parcelas_total}x)` : 'Mensal'}<div class="sub2">dia ${c.dia_vencimento}</div></td>
+        <td class="num">${c.forma === 'avulso' ? '—' : brl(c.valor)}</td>
+        <td>${esc(formaCliente(c))}${Number(c.fiado_pendente) ? `<div class="sub2"><span class="tag hoje">fiado ${brl(c.fiado_pendente)}</span></div>` : ''}</td>
         <td>${prox}</td>
         <td>${sit}</td>
         <td class="num"><button class="btn mini" data-ver="${c.id}">Abrir</button> <button class="btn mini" data-editar="${c.id}">Editar</button></td>
@@ -348,6 +370,7 @@ async function pgClientes(el) {
 function modalCliente(c, aoSalvar) {
   const novo = !c;
   c = c || { forma: 'mensal', dia_vencimento: 10, ativo: true };
+  const diaSem = c.dia_semana ?? (c.primeiro_vencimento ? new Date(c.primeiro_vencimento + 'T12:00').getDay() : 5);
   abrirModal(`
     <form id="f-cli">
       <div class="modal-topo"><h2>${novo ? 'Novo cliente' : 'Editar cliente'}</h2><button type="button" class="fechar" data-fechar>×</button></div>
@@ -355,17 +378,25 @@ function modalCliente(c, aoSalvar) {
         <label>Nome do cliente *<input name="nome" required value="${esc(c.nome || '')}"></label>
         <div class="linha">
           <label>WhatsApp com DDD *<input name="telefone" required placeholder="51 99999-9999" value="${esc(c.telefone ? fone(c.telefone) : '')}"></label>
-          <label>Forma de cobrança<select name="forma"><option value="mensal">Mensalidade contínua</option><option value="carne">Carnê (parcelas)</option></select></label>
+          <label>Forma de cobrança<select name="forma">
+            <option value="mensal">Mensalidade (todo mês)</option>
+            <option value="semanal">Semanal (toda semana)</option>
+            <option value="quinzenal">Quinzenal (a cada 15 dias)</option>
+            <option value="carne">Carnê (parcelas mensais)</option>
+            <option value="avulso">Só avulso / fiado (sem valor fixo)</option>
+          </select></label>
         </div>
         <div class="linha3">
-          <label>Valor (R$) *<input name="valor" required inputmode="decimal" value="${c.valor != null ? String(c.valor).replace('.', ',') : ''}"></label>
-          <label>Dia do vencimento *<input name="dia_vencimento" type="number" min="1" max="31" required value="${c.dia_vencimento || ''}"></label>
-          <label id="lb-parc">Nº de parcelas<input name="parcelas_total" type="number" min="1" value="${c.parcelas_total || ''}"></label>
+          <label class="f-valor">Valor (R$) *<input name="valor" inputmode="decimal" value="${c.valor != null && c.forma !== 'avulso' ? String(c.valor).replace('.', ',') : ''}"></label>
+          <label class="f-mes">Dia do vencimento *<input name="dia_vencimento" type="number" min="1" max="31" value="${c.dia_vencimento || ''}"></label>
+          <label class="f-sem">Dia da semana *<select name="dia_semana">${DIAS_SEMANA.map((d, i) => `<option value="${i}" ${i === Number(diaSem) ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+          <label class="f-parc">Nº de parcelas<input name="parcelas_total" type="number" min="1" value="${c.parcelas_total || ''}"></label>
         </div>
-        <label>Primeiro vencimento<input name="primeiro_vencimento" type="date" value="${c.primeiro_vencimento || ''}">
-          <div class="ajuda">${novo ? 'Deixe em branco para usar o próximo dia de vencimento.' : 'Alterar não apaga cobranças já geradas.'}</div></label>
+        <label class="f-prim">Primeiro vencimento<input name="primeiro_vencimento" type="date" value="${c.primeiro_vencimento || ''}">
+          <div class="ajuda" id="ajuda-prim"></div></label>
+        <div class="aviso info pequeno f-avulso">Cliente sem cobrança fixa: use <b>Lançar consumo</b> na ficha dele para cobrar um corte avulso ou pendurar no fiado.</div>
         <div class="linha">
-          <label>Identificação (opcional)<input name="identificacao" placeholder="ex.: Cond. Atlântico, casa 12" value="${esc(c.identificacao || '')}"></label>
+          <label>Identificação (opcional)<input name="identificacao" placeholder="ex.: apelido, empresa" value="${esc(c.identificacao || '')}"></label>
           <label>Endereço (opcional)<input name="endereco" value="${esc(c.endereco || '')}"></label>
         </div>
         <label>Observações<textarea name="observacoes" style="min-height:60px">${esc(c.observacoes || '')}</textarea></label>
@@ -380,12 +411,25 @@ function modalCliente(c, aoSalvar) {
     </form>`);
   const f = $('#f-cli');
   f.forma.value = c.forma || 'mensal';
-  const tg = () => $('#lb-parc').style.visibility = f.forma.value === 'carne' ? 'visible' : 'hidden';
+  const tg = () => {
+    const fm = f.forma.value;
+    const per = fm === 'semanal' || fm === 'quinzenal';
+    $('.f-valor', f).classList.toggle('hidden', fm === 'avulso');
+    $('.f-mes', f).classList.toggle('hidden', per || fm === 'avulso');
+    $('.f-sem', f).classList.toggle('hidden', !per);
+    $('.f-parc', f).classList.toggle('hidden', fm !== 'carne');
+    $('.f-prim', f).classList.toggle('hidden', fm === 'avulso');
+    $('.f-avulso', f).classList.toggle('hidden', fm !== 'avulso');
+    $('#ajuda-prim').textContent = per
+      ? 'Em branco = no próximo dia da semana escolhido. Se informar a data, o dia da semana segue ela.'
+      : (novo ? 'Deixe em branco para usar o próximo dia de vencimento.' : 'Alterar não apaga cobranças já geradas.');
+  };
   f.forma.onchange = tg; tg();
   f.onsubmit = async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(f));
     body.ativo = f.ativo.checked; body.pausado = f.pausado.checked;
+    if (!novo && (body.forma === 'semanal' || body.forma === 'quinzenal') && Number(body.dia_semana) !== Number(c.dia_semana) && body.primeiro_vencimento === c.primeiro_vencimento) body.primeiro_vencimento = '';
     try {
       await api(novo ? '/clientes' : `/clientes/${c.id}`, { method: novo ? 'POST' : 'PUT', body });
       fecharModal(); toast('Cliente salvo ✓'); aoSalvar && aoSalvar();
@@ -399,14 +443,29 @@ function modalCliente(c, aoSalvar) {
 }
 
 async function modalFichaCliente(id) {
-  const c = await api(`/clientes/${id}`);
+  const [c, consumos] = await Promise.all([api(`/clientes/${id}`), api(`/clientes/${id}/consumos`)]);
+  const pend = consumos.filter((x) => !x.cobranca_id);
+  const totPend = pend.reduce((t, x) => t + Number(x.valor), 0);
+  const sitConsumo = (x) => {
+    if (!x.cobranca_id) return '<span class="tag hoje">Pendurado</span>';
+    if (x.cob_status === 'pago') return '<span class="tag pago">Pago</span>';
+    if (x.cob_status === 'cancelado') return '<span class="tag">Cancelado</span>';
+    return `<span class="tag aberto">Na cobrança de ${brData(x.cob_vencimento)}</span>`;
+  };
   abrirModal(`
-    <div class="modal-topo"><div><h2>${esc(c.nome)}</h2><div class="muted pequeno">${fone(c.telefone)} · ${brl(c.valor)} · ${c.forma === 'carne' ? `carnê ${c.parcelas_total}x` : 'mensal'} · dia ${c.dia_vencimento}</div></div><button class="fechar" data-fechar>×</button></div>
+    <div class="modal-topo"><div><h2>${esc(c.nome)}</h2><div class="muted pequeno">${fone(c.telefone)} · ${c.forma === 'avulso' ? '' : brl(c.valor) + ' · '}${esc(formaCliente(c))}</div></div><button class="fechar" data-fechar>×</button></div>
     <div class="modal-corpo">
       ${c.observacoes ? `<div class="aviso info">${esc(c.observacoes)}</div>` : ''}
+      <div class="cartao-topo" style="padding:0;margin-bottom:8px;border:0"><h3 style="margin:0">Consumo avulso / fiado</h3>
+        <div class="acoes"><button class="btn mini primario" id="lancar-consumo">＋ Lançar consumo</button>${totPend ? `<button class="btn mini" id="cobrar-fiado">Cobrar fiado agora (${brl(totPend)})</button>` : ''}</div></div>
+      ${totPend ? `<div class="aviso pequeno">Fiado pendurado: <b>${brl(totPend)}</b>. ${c.forma === 'avulso' ? 'Clique em “Cobrar fiado agora” para mandar a cobrança.' : 'Entra sozinho na próxima cobrança do cliente.'}</div>` : ''}
+      ${consumos.length ? `<div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Data</th><th>Descrição</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
+        ${consumos.slice(0, 30).map((x) => `<tr><td>${brData(x.data)}</td><td>${esc(x.descricao)}${x.origem === 'agenda' ? ' <span class="sub2">agenda</span>' : x.origem === 'produto' ? ' <span class="sub2">produto</span>' : ''}</td><td class="num">${brl(x.valor)}</td><td>${sitConsumo(x)}</td>
+          <td class="num">${x.cob_status === 'pago' ? '' : `<button class="btn mini" data-del-consumo="${x.id}" title="Excluir lançamento">✕</button>`}</td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="muted pequeno" style="margin-bottom:16px">Nenhum consumo lançado.</p>'}
       <h3>Cobranças</h3>
-      <div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Mês</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
-      ${c.cobrancas.map((cb) => `<tr><td>${MESES[Number(cb.competencia.slice(5, 7)) - 1].slice(0, 3)}/${cb.competencia.slice(0, 4)}${cb.numero_parcela ? ` <span class="sub2">(${cb.numero_parcela}/${c.parcelas_total})</span>` : ''}</td>
+      <div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Referente a</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
+      ${c.cobrancas.map((cb) => `<tr><td>${esc(refCobranca(cb, c.forma))}${cb.numero_parcela ? ` <span class="sub2">(${cb.numero_parcela}/${c.parcelas_total})</span>` : ''}${cb.tipo === 'avulsa' ? ' <span class="tag">avulsa</span>' : ''}</td>
         <td>${brData(cb.vencimento)}</td><td class="num">${brl(cb.valor)}</td>
         <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">pago ${brData(cb.pago_em)}</div>` : ''}</td>
         <td class="num">${acoesCobranca(cb)}</td></tr>`).join('') || '<tr><td colspan="5" class="vazio">Sem cobranças</td></tr>'}
@@ -418,6 +477,20 @@ async function modalFichaCliente(id) {
     <div class="modal-rodape"><button class="btn" id="editar-ficha">Editar cliente</button><button class="btn primario" data-fechar>Fechar</button></div>`, true);
   ligarAcoesCobranca($('#modal-caixa'), () => modalFichaCliente(id));
   $('#editar-ficha').onclick = () => modalCliente(c, () => rotear());
+  $('#lancar-consumo').onclick = () => modalConsumo(c, () => modalFichaCliente(id));
+  const cf = $('#cobrar-fiado');
+  if (cf) cf.onclick = async () => {
+    const enviar = await confirmar('Cobrar o fiado agora?', `Gera uma cobrança de <b>${brl(totPend)}</b> com vencimento hoje e manda no WhatsApp com o Pix.`, 'Cobrar e enviar');
+    if (!enviar) return modalFichaCliente(id);
+    try { const r = await api(`/clientes/${id}/fiado/cobrar`, { method: 'POST', body: { enviar: true } }); toast(r.aviso || 'Cobrança enviada ✓', !!r.aviso); }
+    catch (e) { toast(e.message, true); }
+    modalFichaCliente(id);
+  };
+  $$('[data-del-consumo]').forEach((b) => b.onclick = async () => {
+    if (!(await confirmar('Excluir lançamento?', 'O valor sai da cobrança em que ele entrou (se ainda não foi paga).', 'Excluir', true))) return modalFichaCliente(id);
+    try { await api(`/consumos/${b.dataset.delConsumo}`, { method: 'DELETE' }); toast('Lançamento excluído'); } catch (e) { toast(e.message, true); }
+    modalFichaCliente(id);
+  });
 }
 
 function acoesCobranca(cb) {
@@ -453,7 +526,7 @@ function modalPagar(id, valor, aoSalvar) {
     <div class="modal-corpo">
       <div class="linha"><label>Data do pagamento<input type="date" name="data" value="${HOJE}"></label>
       <label>Valor recebido (R$)<input name="valor" inputmode="decimal" value="${String(valor).replace('.', ',')}"></label></div>
-      <label>Forma<select name="forma"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option><option value="boleto">Boleto</option><option value="cartao">Cartão</option></select></label>
+      <label>Forma<select name="forma"><option value="pix">Pix</option><option value="dinheiro">Dinheiro</option><option value="debito">Cartão de débito</option><option value="cartao">Cartão de crédito</option><option value="transferencia">Transferência</option><option value="boleto">Boleto</option></select></label>
       <label>Observação<input name="obs"></label>
       <label class="check"><input type="checkbox" name="agradecer" ${CONFIG.agradecer_pagamento ? 'checked' : ''}> Enviar mensagem de agradecimento no WhatsApp</label>
     </div>
@@ -479,7 +552,7 @@ async function pgCobrancas(el) {
   const r = d.resumo;
   const pct = r.previsto ? Math.round((r.recebido / r.previsto) * 100) : 0;
   el.innerHTML = `
-    <div class="cabecalho"><div><h1>Cobranças</h1><div class="muted">Mensalidades e parcelas por mês.</div></div>
+    <div class="cabecalho"><div><h1>Cobranças</h1><div class="muted">Mensalidades, semanais, parcelas e avulsas do mês.</div></div>
       <div class="acoes"><button class="btn" id="mes-ant">←</button><b style="min-width:140px;text-align:center">${MESES[m - 1]} ${y}</b><button class="btn" id="mes-prox">→</button>
       <a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">↓ CSV</a></div></div>
     ${d.anteriores.n ? `<div class="aviso">Há ${d.anteriores.n} cobrança(s) de meses anteriores ainda em aberto (${brl(d.anteriores.v)}). <a href="#" id="ver-atrasadas">Ver lista →</a></div>` : ''}
@@ -502,7 +575,7 @@ async function pgCobrancas(el) {
       return true;
     });
     $('#tb-cob').innerHTML = itens.length ? itens.map((cb) => `<tr>
-      <td><b>${esc(cb.nome)}</b><div class="sub2">${fone(cb.telefone)}${cb.numero_parcela ? ` · parcela ${cb.numero_parcela}/${cb.parcelas_total}` : ''}</div></td>
+      <td><b>${esc(cb.nome)}</b> ${cb.tipo === 'avulsa' ? '<span class="tag">avulsa</span>' : ''}<div class="sub2">${fone(cb.telefone)} · ${esc(refCobranca(cb, cb.forma))}${cb.numero_parcela ? ` · parcela ${cb.numero_parcela}/${cb.parcelas_total}` : ''}</div></td>
       <td>${brData(cb.vencimento)}</td>
       <td class="num">${brl(cb.valor)}${cb.pago_valor && cb.pago_valor !== cb.valor ? `<div class="sub2">pago ${brl(cb.pago_valor)}</div>` : ''}</td>
       <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">em ${brData(cb.pago_em)}</div>` : ''}</td>
@@ -667,7 +740,8 @@ async function pgConfig(el) {
         <div class="cartao pad">
           <h3>Régua de cobrança</h3>
           <p class="muted pequeno">Cada cliente recebe no máximo uma mensagem por dia. Se o sistema ficar desligado, ele manda só a etapa mais recente (até ${c.tolerancia_dias} dia(s) de atraso da etapa).</p>
-          <div class="vars">Campos: ${['primeiro_nome', 'nome', 'valor', 'vencimento', 'dias_atraso', 'empresa', 'parcela', 'mes', 'total_aberto', 'pix'].map((v) => `<code data-var="{${v}}">{${v}}</code>`).join(' ')}</div>
+          <div class="vars">Campos: ${['primeiro_nome', 'nome', 'valor', 'vencimento', 'descricao', 'dias_atraso', 'empresa', 'parcela', 'mes', 'total_aberto', 'pix'].map((v) => `<code data-var="{${v}}">{${v}}</code>`).join(' ')}</div>
+          <p class="muted pequeno">{descricao} vira “mensalidade de novembro/2026”, “semana de 07/11”, “parcela 3/10” ou o que foi consumido (ex.: Corte).</p>
           <div id="regua"></div>
           <button type="button" class="btn" id="add-etapa">＋ Adicionar etapa</button>
         </div>
@@ -708,6 +782,31 @@ async function pgConfig(el) {
           <label>Lembrete<textarea name="agenda_msg_lembrete">${esc(c.agenda_msg_lembrete)}</textarea></label>
           <label>Quando o cliente responde SIM<textarea name="agenda_msg_confirmado" style="min-height:60px">${esc(c.agenda_msg_confirmado)}</textarea></label>
           <label>Quando o cliente responde CANCELAR<textarea name="agenda_msg_cancelado" style="min-height:60px">${esc(c.agenda_msg_cancelado)}</textarea></label>
+        </div>
+        <div class="cartao pad" style="margin-top:14px">
+          <h3>Agendamento online (link para o cliente)</h3>
+          <label class="check"><input type="checkbox" name="online_ativo" ${c.online_ativo ? 'checked' : ''}> <b>Deixar os clientes marcarem horário sozinhos pelo link</b></label>
+          <div class="aviso info pequeno">Link para mandar aos clientes e colocar no Instagram: <b><a href="${location.origin}/agendar" target="_blank">${location.origin}/agendar</a></b> <button type="button" class="btn mini" id="copiar-link">Copiar</button></div>
+          <div class="linha"><label>Antecedência mínima (min)<input type="number" name="online_antecedencia_min" min="0" step="15" value="${c.online_antecedencia_min}"><div class="ajuda">Ex.: 60 = não deixa marcar para daqui a menos de 1 hora.</div></label>
+            <label>Até quantos dias à frente<input type="number" name="online_dias" min="1" max="90" value="${c.online_dias}"></label></div>
+          <label>Recado na página (opcional)<textarea name="online_aviso" style="min-height:50px" placeholder="ex.: Chegue 5 minutos antes. Atrasos de 15 min podem perder o horário.">${esc(c.online_aviso)}</textarea></label>
+          <p class="muted pequeno">O cliente escolhe serviço, profissional (ou “sem preferência”), dia e horário livre. O horário entra na agenda e ele recebe a confirmação no WhatsApp (SIM / CANCELAR).</p>
+        </div>
+        <div class="cartao pad" style="margin-top:14px">
+          <h3>Retorno: “faz tempo que não te vejo”</h3>
+          <label class="check"><input type="checkbox" name="retorno_ativo" ${c.retorno_ativo ? 'checked' : ''}> <b>Chamar no WhatsApp quem não aparece há um tempo</b></label>
+          <div class="linha3"><label>Depois de quantos dias<input type="number" name="retorno_dias" min="7" value="${c.retorno_dias}"></label>
+            <label>Horário do envio<input type="time" name="retorno_hora" value="${esc(c.retorno_hora)}"></label>
+            <label>Máximo por dia<input type="number" name="retorno_limite" min="1" value="${c.retorno_limite}"></label></div>
+          <div class="vars">Campos: ${['primeiro_nome', 'nome', 'dias', 'servico', 'profissional', 'ultima_visita', 'empresa', 'link_agendamento'].map((v) => `<code data-var="{${v}}">{${v}}</code>`).join(' ')}</div>
+          <label>Mensagem<textarea name="retorno_msg">${esc(c.retorno_msg)}</textarea></label>
+          <div id="retorno-info" class="muted pequeno"></div>
+          <p class="muted pequeno">Só chama quem teve atendimento concluído na agenda, não tem horário marcado e ainda não foi chamado desde a última visita. Cada pessoa recebe no máximo uma vez por visita.</p>
+        </div>
+        <div class="cartao pad" style="margin-top:14px">
+          <h3>Cobrança avulsa (consumo / fiado)</h3>
+          <label>Mensagem enviada ao cobrar um consumo na hora<textarea name="modelo_avulso" style="min-height:80px">${esc(c.modelo_avulso)}</textarea></label>
+          <p class="muted pequeno">Usa os mesmos campos da régua ({primeiro_nome}, {valor}, {descricao}, {empresa}…). O Pix vai junto.</p>
         </div>
       </div>
     </div></form>`;
@@ -770,6 +869,11 @@ async function pgConfig(el) {
     } catch (e) { toast(e.message, true); throw e; }
   };
   $('#salvar-cfg').onclick = () => salvarCfg(false);
+  $('#copiar-link').onclick = () => { navigator.clipboard.writeText(location.origin + '/agendar'); toast('Link copiado ✓'); };
+  api('/retorno/previa').then((r) => {
+    const box = $('#retorno-info');
+    if (box) box.innerHTML = `Hoje ${r.candidatos} cliente(s) se encaixam · ${r.enviados_30d} chamado(s) nos últimos 30 dias.<div class="previa" style="margin-top:6px">${esc(r.exemplo)}</div>`;
+  }).catch(() => {});
 }
 
 // ---------- Personalização ----------
