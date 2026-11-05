@@ -42,7 +42,16 @@ async function pgAgenda(el) {
     </div>
     ${!ativos.length ? `<div class="cartao vazio"><b>Cadastre os profissionais para começar</b>Cada profissional vira uma coluna na agenda, com o próprio horário de trabalho.<br><br>
       ${pode('agenda_config') ? '<button class="btn primario" id="ag-prof2">Cadastrar profissionais</button>' : 'Peça ao administrador para cadastrar.'}</div>` : `
-    <div class="cartao">
+    <div class="ag-mobbar">
+      <button class="agm-ic" id="agm-menu" aria-label="Menu">☰</button>
+      <label class="agm-mes"><span id="agm-mes"></span> ▾<input type="date" id="agm-data" value="${AG.data}" aria-label="Escolher data"></label>
+      <span class="agm-esp"></span>
+      <select id="agm-vista" aria-label="Visão"><option value="dia">Dia</option><option value="3dias">3 dias</option><option value="semana">Semana</option></select>
+      <button class="agm-hoje" id="agm-hoje" aria-label="Hoje">${Number(hojeLocal().slice(8))}</button>
+      <button class="agm-ic" id="agm-mais" aria-label="Mais opções">⋮</button>
+    </div>
+    <button class="ag-fab" id="ag-fab" aria-label="Agendar">＋</button>
+    <div class="cartao ag-cartao">
       <div class="cartao-topo">
         <div class="filtros">
           <button class="btn" id="ag-ant" aria-label="Anterior">←</button>
@@ -90,6 +99,27 @@ async function pgAgenda(el) {
     b.onclick = () => { AG.vista = b.dataset.v; try { localStorage.setItem('ag_vista', AG.vista); } catch (e) { /* sem storage */ } rotear(); };
   });
   $('#ag-psem').onchange = (e) => { AG.profSemana = Number(e.target.value); desenharAgenda(); };
+  // celular (estilo Google Agenda)
+  $('#agm-menu').onclick = () => $('.sidebar').classList.toggle('aberta');
+  $('#agm-vista').value = AG.vista;
+  $('#agm-vista').onchange = (e) => { const b = $(`#ag-vista button[data-v="${e.target.value}"]`); if (b) b.click(); };
+  $('#agm-hoje').onclick = () => $('#ag-hoje').click();
+  $('#agm-data').onchange = (e) => { if (e.target.value) { AG.data = e.target.value; desenharAgenda(); } };
+  $('#agm-mais').onclick = () => { document.body.classList.toggle('ag-ferramentas'); ajustarAlturaAgenda(); };
+  document.body.classList.remove('ag-ferramentas');
+  $('#ag-fab').onclick = () => $('#ag-novo').click();
+  // arrastar para o lado troca de dia/período (quando a grade cabe na tela)
+  const wrapEl = $('#ag-wrap');
+  let toque = null;
+  wrapEl.addEventListener('touchstart', (e) => { const t = e.touches[0]; toque = { x: t.clientX, y: t.clientY, tm: Date.now() }; }, { passive: true });
+  wrapEl.addEventListener('touchend', (e) => {
+    if (!toque) return;
+    const t = e.changedTouches[0]; const dx = t.clientX - toque.x, dy = t.clientY - toque.y;
+    const rapido = Date.now() - toque.tm < 600; toque = null;
+    if (!rapido || Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (wrapEl.scrollWidth > wrapEl.clientWidth + 4) return; // tem rolagem lateral: deixa rolar
+    (dx < 0 ? $('#ag-prox') : $('#ag-ant')).click();
+  }, { passive: true });
 
   if (!window._agResize) { window._agResize = true; window.addEventListener('resize', ajustarAlturaAgenda); }
   ajustarAlturaAgenda();
@@ -104,7 +134,8 @@ function ajustarAlturaAgenda() {
   const w = $('#ag-wrap');
   if (!w) return;
   const topo = w.getBoundingClientRect().top + window.scrollY;
-  w.style.maxHeight = `${Math.max(320, window.innerHeight - topo - 22)}px`;
+  const celular = window.matchMedia('(max-width: 760px)').matches;
+  w.style.maxHeight = `${Math.max(320, window.innerHeight - topo - (celular ? 0 : 22))}px`;
 }
 
 // profissionais que entram na conta (todos os ativos ou o filtrado)
@@ -205,7 +236,7 @@ async function desenharAgenda(rolar) {
       const dica = `${a.inicio_local.slice(11)} ${a.cliente_nome || ''}${a.servico_nome ? ' · ' + a.servico_nome : ''}${c.todos ? ' · ' + (a.profissional_nome || '') : ''}`;
       return `<div class="ag-ev st-${a.status} ${a.pago ? 'pago' : ''} ${cols > 1 ? 'estreito' : ''}" data-ag="${a.id}" title="${esc(dica)}"
         style="top:${(t - ini) * PX_MIN}px;height:${h}px;left:calc(${(col / cols) * 100}% + 1px);width:calc(${100 / cols}% - 2px);--cor:${esc(a.cor)}">
-        <div class="ag-ev-l1"><b>${a.inicio_local.slice(11)}</b> ${esc(a.status === 'bloqueio' ? '🔒 ' + (a.cliente_nome || 'Bloqueado') : a.cliente_nome || '')}${a.status === 'confirmado' ? ' ✓' : ''}${a.pago ? ' 💲' : ''}</div>
+        <div class="ag-ev-l1"><b class="ev-h">${a.inicio_local.slice(11)}</b> <span class="ev-n">${esc(a.status === 'bloqueio' ? '🔒 ' + (a.cliente_nome || 'Bloqueado') : a.cliente_nome || '')}</span>${a.status === 'confirmado' ? ' ✓' : ''}${a.pago ? ' 💲' : ''}</div>
         ${curto ? '' : `<div class="ag-ev-l2">${c.todos ? `<b>${esc(a.profissional_nome || '')}</b> · ` : ''}${esc(a.servico_nome || '')}${a.status !== 'agendado' && a.status !== 'confirmado' && a.status !== 'bloqueio' ? ` · ${NOME_STATUS[a.status]}` : ''}</div>`}
       </div>`;
     }).join('');
@@ -224,11 +255,17 @@ async function desenharAgenda(rolar) {
   wrap.style.setProperty('--ncol', colunas.length);
   // com todos os profissionais na mesma coluna, cada dia precisa de mais largura
   const nP = ativos.length;
-  wrap.style.setProperty('--colmin', AG.vista === 'dia' || AG.profSemana ? '150px'
+  const celular = window.matchMedia('(max-width: 760px)').matches;
+  wrap.style.setProperty('--colmin', celular ? (AG.vista === 'dia' && colunas.length > 4 ? '78px' : '0px')
+    : AG.vista === 'dia' || AG.profSemana ? '150px'
     : AG.vista === '3dias' ? `${Math.min(320, 110 + nP * 55)}px` : `${Math.max(150, Math.min(210, 60 + nP * 38))}px`);
+  const mes = MESES[Number(colunas[0].data.slice(5, 7)) - 1];
+  $('#agm-mes').textContent = mes.toLowerCase();
+  $('#agm-data').value = AG.data;
+  $('#agm-vista').value = AG.vista;
   wrap.innerHTML = `
     <div class="ag-grade">
-      <div class="ag-cab"><div class="ag-canto"></div>${colunas.map((c) => `<div class="ag-cab-col ${c.hoje && AG.vista !== 'dia' ? 'hoje' : ''}">${AG.vista === 'dia' ? `<span class="ag-ponto" style="background:${esc(c.prof.cor)}"></span>` : ''}${esc(c.titulo)}</div>`).join('')}</div>
+      <div class="ag-cab"><div class="ag-canto"></div>${colunas.map((c) => `<div class="ag-cab-col ${c.hoje && AG.vista !== 'dia' ? 'hoje' : ''}">${AG.vista === 'dia' ? `<span class="ag-ponto" style="background:${esc(c.prof.cor)}"></span>${esc(c.titulo)}` : `<span class="cab-d">${esc(c.titulo)}</span><span class="cab-m"><small>${DIAS_CURTO[dow(c.data)].toUpperCase()}.</small><b>${Number(c.data.slice(8))}</b></span>`}</div>`).join('')}</div>
       <div class="ag-corpo">
         <div class="ag-regua" style="height:${altura}px">${regua.filter((m) => m % 60 === 0).map((m) => `<span style="top:${(m - ini) * PX_MIN}px">${hm(m)}</span>`).join('')}</div>
         ${colHtml}
