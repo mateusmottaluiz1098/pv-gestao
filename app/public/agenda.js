@@ -1,10 +1,10 @@
-/* Agenda — visão por dia (colunas por profissional) e por semana (um profissional) */
+/* Agenda — visão por dia (colunas por profissional), 3 dias e semana (todos os profissionais ou um só) */
 /* Usa as funções globais do app.js: $, $$, esc, brl, brData, api, toast, abrirModal, fecharModal, confirmar, pode, CONFIG, HOJE */
 
 const AG = {
   data: null,          // 'YYYY-MM-DD'
-  vista: 'dia',        // 'dia' | 'semana'
-  profSemana: null,    // id do profissional na visão semana
+  vista: (() => { try { return localStorage.getItem('ag_vista') || 'dia'; } catch (e) { return 'dia'; } })(), // 'dia' | '3dias' | 'semana'
+  profSemana: 0,       // visão 3 dias/semana: 0 = todos os profissionais, ou o id de um
   profs: [],
   servs: [],
   itens: [],
@@ -26,7 +26,8 @@ async function pgAgenda(el) {
   AG.data = AG.data || hojeLocal();
   [AG.profs, AG.servs] = await Promise.all([api('/agenda/profissionais'), api('/agenda/servicos')]);
   const ativos = AG.profs.filter((p) => p.ativo);
-  if (!AG.profSemana || !ativos.some((p) => p.id === AG.profSemana)) AG.profSemana = ativos[0] ? ativos[0].id : null;
+  if (!['dia', '3dias', 'semana'].includes(AG.vista)) AG.vista = 'dia';
+  if (AG.profSemana && !ativos.some((p) => p.id === AG.profSemana)) AG.profSemana = 0;
 
   el.innerHTML = `
     <div class="cabecalho">
@@ -49,8 +50,8 @@ async function pgAgenda(el) {
           <input type="date" id="ag-data" value="${AG.data}">
         </div>
         <div class="filtros">
-          <div class="seg" id="ag-vista"><button data-v="dia">Dia</button><button data-v="semana">Semana</button></div>
-          <select id="ag-psem" class="${AG.vista === 'semana' ? '' : 'hidden'}">${ativos.map((p) => `<option value="${p.id}" ${p.id === AG.profSemana ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>
+          <div class="seg" id="ag-vista"><button data-v="dia">Dia</button><button data-v="3dias">3 dias</button><button data-v="semana">Semana</button></div>
+          <select id="ag-psem" class="${AG.vista === 'dia' ? 'hidden' : ''}"><option value="0">Todos os profissionais</option>${ativos.map((p) => `<option value="${p.id}" ${p.id === AG.profSemana ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>
         </div>
       </div>
       <div id="ag-resumo" class="ag-resumo"></div>
@@ -60,17 +61,17 @@ async function pgAgenda(el) {
   $('#ag-prof').onclick = () => modalProfissionais();
   $('#ag-serv').onclick = () => modalServicos();
   const p2 = $('#ag-prof2'); if (p2) p2.onclick = () => modalProfissionais();
-  $('#ag-novo').onclick = () => modalAgendamento(null, { data: AG.data, hora: null, profissional_id: AG.vista === 'semana' ? AG.profSemana : (ativos[0] && ativos[0].id) });
+  $('#ag-novo').onclick = () => modalAgendamento(null, { data: AG.data, hora: null, profissional_id: AG.vista !== 'dia' && AG.profSemana ? AG.profSemana : (ativos[0] && ativos[0].id) });
   if (!ativos.length) { $('#ag-titulo').textContent = ''; return; }
 
-  const passo = AG.vista === 'semana' ? 7 : 1;
+  const passo = AG.vista === 'semana' ? 7 : AG.vista === '3dias' ? 3 : 1;
   $('#ag-ant').onclick = () => { AG.data = addDias(AG.data, -passo); desenharAgenda(); };
   $('#ag-prox').onclick = () => { AG.data = addDias(AG.data, passo); desenharAgenda(); };
   $('#ag-hoje').onclick = () => { AG.data = hojeLocal(); desenharAgenda(); };
   $('#ag-data').onchange = (e) => { if (e.target.value) { AG.data = e.target.value; desenharAgenda(); } };
   $$('#ag-vista button').forEach((b) => {
     b.classList.toggle('sel', b.dataset.v === AG.vista);
-    b.onclick = () => { AG.vista = b.dataset.v; rotear(); };
+    b.onclick = () => { AG.vista = b.dataset.v; try { localStorage.setItem('ag_vista', AG.vista); } catch (e) { /* sem storage */ } rotear(); };
   });
   $('#ag-psem').onchange = (e) => { AG.profSemana = Number(e.target.value); desenharAgenda(); };
 
@@ -85,14 +86,15 @@ async function desenharAgenda(rolar) {
   const ativos = AG.profs.filter((p) => p.ativo);
   let colunas;
   let de, ate;
-  if (AG.vista === 'semana') {
-    de = inicioSemana(AG.data); ate = addDias(de, 6);
-    const prof = AG.profs.find((p) => p.id === AG.profSemana) || ativos[0];
-    colunas = Array.from({ length: 7 }, (_, i) => {
+  if (AG.vista !== 'dia') {
+    const nDias = AG.vista === 'semana' ? 7 : 3;
+    de = AG.vista === 'semana' ? inicioSemana(AG.data) : AG.data; ate = addDias(de, nDias - 1);
+    const prof = AG.profSemana ? AG.profs.find((p) => p.id === AG.profSemana) : null;
+    colunas = Array.from({ length: nDias }, (_, i) => {
       const d = addDias(de, i);
-      return { chave: d, data: d, prof, titulo: `${DIAS_CURTO[dow(d)]} ${d.slice(8)}/${d.slice(5, 7)}`, hoje: d === hojeLocal() };
+      return { chave: d, data: d, prof, todos: !prof, titulo: `${DIAS_CURTO[dow(d)]} ${d.slice(8)}/${d.slice(5, 7)}`, hoje: d === hojeLocal() };
     });
-    $('#ag-titulo').textContent = `${prof.nome} · semana de ${brData(de)} a ${brData(ate)}`;
+    $('#ag-titulo').textContent = `${prof ? prof.nome : 'Todos os profissionais'} · ${brData(de)} a ${brData(ate)}`;
   } else {
     de = ate = AG.data;
     colunas = ativos.map((p) => ({ chave: p.id, data: AG.data, prof: p, titulo: p.nome, hoje: AG.data === hojeLocal() }));
@@ -115,24 +117,36 @@ async function desenharAgenda(rolar) {
   for (let m = ini; m < fim; m += intervalo) regua.push(m);
 
   const colHtml = colunas.map((c) => {
-    const exp = c.prof.expediente || {};
-    const trabalha = (exp.dias || []).includes(dow(c.data));
     const sombras = [];
-    if (!trabalha) sombras.push([ini, fim]);
-    else {
-      if (minDe(exp.inicio) > ini) sombras.push([ini, minDe(exp.inicio)]);
-      if (minDe(exp.fim) < fim) sombras.push([minDe(exp.fim), fim]);
-      if (exp.almoco_inicio && exp.almoco_fim) sombras.push([minDe(exp.almoco_inicio), minDe(exp.almoco_fim)]);
+    if (c.todos) {
+      // todos os profissionais: sombreia só onde ninguém trabalha
+      const exps = ativos.map((p) => p.expediente || {}).filter((e) => (e.dias || []).includes(dow(c.data)) && e.inicio && e.fim);
+      if (!exps.length) sombras.push([ini, fim]);
+      else {
+        const i0 = Math.min(...exps.map((e) => minDe(e.inicio))), f0 = Math.max(...exps.map((e) => minDe(e.fim)));
+        if (i0 > ini) sombras.push([ini, i0]);
+        if (f0 < fim) sombras.push([f0, fim]);
+      }
+    } else {
+      const exp = c.prof.expediente || {};
+      const trabalha = (exp.dias || []).includes(dow(c.data));
+      if (!trabalha) sombras.push([ini, fim]);
+      else {
+        if (minDe(exp.inicio) > ini) sombras.push([ini, minDe(exp.inicio)]);
+        if (minDe(exp.fim) < fim) sombras.push([minDe(exp.fim), fim]);
+        if (exp.almoco_inicio && exp.almoco_fim) sombras.push([minDe(exp.almoco_inicio), minDe(exp.almoco_fim)]);
+      }
     }
-    const itens = AG.itens.filter((a) => a.profissional_id === c.prof.id && a.inicio_local.slice(0, 10) === c.data);
+    const itens = AG.itens.filter((a) => (c.todos || a.profissional_id === c.prof.id) && a.inicio_local.slice(0, 10) === c.data);
     const eventos = layoutSobrepostos(itens).map(({ a, col, cols }) => {
       const t = minDe(a.inicio_local.slice(11)), f = minDe(a.fim_local.slice(11));
       const h = Math.max(18, (f - t) * PX_MIN - 2);
       const curto = h < 40;
-      return `<div class="ag-ev st-${a.status} ${a.pago ? 'pago' : ''}" data-ag="${a.id}"
-        style="top:${(t - ini) * PX_MIN}px;height:${h}px;left:calc(${(col / cols) * 100}% + 2px);width:calc(${100 / cols}% - 4px);--cor:${esc(a.cor)}">
+      const dica = `${a.inicio_local.slice(11)} ${a.cliente_nome || ''}${a.servico_nome ? ' · ' + a.servico_nome : ''}${c.todos ? ' · ' + (a.profissional_nome || '') : ''}`;
+      return `<div class="ag-ev st-${a.status} ${a.pago ? 'pago' : ''} ${cols > 1 ? 'estreito' : ''}" data-ag="${a.id}" title="${esc(dica)}"
+        style="top:${(t - ini) * PX_MIN}px;height:${h}px;left:calc(${(col / cols) * 100}% + 1px);width:calc(${100 / cols}% - 2px);--cor:${esc(a.cor)}">
         <div class="ag-ev-l1"><b>${a.inicio_local.slice(11)}</b> ${esc(a.status === 'bloqueio' ? '🔒 ' + (a.cliente_nome || 'Bloqueado') : a.cliente_nome || '')}${a.status === 'confirmado' ? ' ✓' : ''}${a.pago ? ' 💲' : ''}</div>
-        ${curto ? '' : `<div class="ag-ev-l2">${esc(a.servico_nome || '')}${a.status !== 'agendado' && a.status !== 'confirmado' && a.status !== 'bloqueio' ? ` · ${NOME_STATUS[a.status]}` : ''}</div>`}
+        ${curto ? '' : `<div class="ag-ev-l2">${c.todos ? `<b>${esc(a.profissional_nome || '')}</b> · ` : ''}${esc(a.servico_nome || '')}${a.status !== 'agendado' && a.status !== 'confirmado' && a.status !== 'bloqueio' ? ` · ${NOME_STATUS[a.status]}` : ''}</div>`}
       </div>`;
     }).join('');
     let agora = '';
@@ -140,7 +154,7 @@ async function desenharAgenda(rolar) {
       const d = new Date(); const m = d.getHours() * 60 + d.getMinutes();
       if (m >= ini && m <= fim) agora = `<div class="ag-agora" style="top:${(m - ini) * PX_MIN}px"></div>`;
     }
-    return `<div class="ag-col" data-col="${c.chave}" data-data="${c.data}" data-prof="${c.prof.id}" style="height:${altura}px">
+    return `<div class="ag-col" data-col="${c.chave}" data-data="${c.data}" data-prof="${c.todos ? '' : c.prof.id}" style="height:${altura}px">
       ${sombras.map(([a, b]) => `<div class="ag-fora" style="top:${(Math.max(a, ini) - ini) * PX_MIN}px;height:${(Math.min(b, fim) - Math.max(a, ini)) * PX_MIN}px"></div>`).join('')}
       ${regua.map((m) => `<div class="ag-slot ${m % 60 === 0 ? 'hora' : ''}" data-hora="${hm(m)}" style="top:${(m - ini) * PX_MIN}px;height:${intervalo * PX_MIN}px"></div>`).join('')}
       ${eventos}${agora}
@@ -148,9 +162,13 @@ async function desenharAgenda(rolar) {
   }).join('');
 
   wrap.style.setProperty('--ncol', colunas.length);
+  // com todos os profissionais na mesma coluna, cada dia precisa de mais largura
+  const nP = ativos.length;
+  wrap.style.setProperty('--colmin', AG.vista === 'dia' || AG.profSemana ? '150px'
+    : AG.vista === '3dias' ? `${Math.min(320, 110 + nP * 55)}px` : `${Math.max(150, Math.min(210, 60 + nP * 38))}px`);
   wrap.innerHTML = `
     <div class="ag-grade">
-      <div class="ag-cab"><div class="ag-canto"></div>${colunas.map((c) => `<div class="ag-cab-col ${c.hoje && AG.vista === 'semana' ? 'hoje' : ''}">${AG.vista === 'dia' ? `<span class="ag-ponto" style="background:${esc(c.prof.cor)}"></span>` : ''}${esc(c.titulo)}</div>`).join('')}</div>
+      <div class="ag-cab"><div class="ag-canto"></div>${colunas.map((c) => `<div class="ag-cab-col ${c.hoje && AG.vista !== 'dia' ? 'hoje' : ''}">${AG.vista === 'dia' ? `<span class="ag-ponto" style="background:${esc(c.prof.cor)}"></span>` : ''}${esc(c.titulo)}</div>`).join('')}</div>
       <div class="ag-corpo">
         <div class="ag-regua" style="height:${altura}px">${regua.filter((m) => m % 60 === 0).map((m) => `<span style="top:${(m - ini) * PX_MIN}px">${hm(m)}</span>`).join('')}</div>
         ${colHtml}
@@ -174,13 +192,16 @@ async function desenharAgenda(rolar) {
   $$('.ag-slot', wrap).forEach((s) => s.onclick = () => {
     if (!pode('agenda')) return;
     const col = s.closest('.ag-col');
-    modalAgendamento(null, { data: col.dataset.data, hora: s.dataset.hora, profissional_id: Number(col.dataset.prof) });
+    const profCol = Number(col.dataset.prof) || ((ativos.find((p) => ((p.expediente || {}).dias || []).includes(dow(col.dataset.data))) || ativos[0] || {}).id);
+    modalAgendamento(null, { data: col.dataset.data, hora: s.dataset.hora, profissional_id: profCol });
   });
   $$('.ag-ev', wrap).forEach((e) => e.onclick = (ev) => { ev.stopPropagation(); modalAgendamento(AG.itens.find((a) => a.id == e.dataset.ag)); });
 
   if (rolar) {
     const alvo = AG.data === hojeLocal() ? new Date().getHours() * 60 - 60 : minDe('08:00');
     wrap.scrollTop = Math.max(0, (alvo - ini) * PX_MIN);
+    const colHoje = wrap.querySelector(`.ag-col[data-data="${hojeLocal()}"]`);
+    if (AG.vista === 'semana' && colHoje) wrap.scrollLeft = Math.max(0, colHoje.offsetLeft - 56);
   }
 }
 

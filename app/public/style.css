@@ -237,12 +237,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(var(--sombra
 .seg button.sel { background: var(--azul-claro); color: var(--texto); }
 .ag-resumo { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 18px; border-bottom: 1px solid var(--borda); font-size: 13px; }
 .ag-wrap { overflow: auto; max-height: calc(100vh - 290px); min-height: 380px; position: relative; }
-.ag-grade { min-width: calc(56px + var(--ncol) * 150px); }
-.ag-cab { display: grid; grid-template-columns: 56px repeat(var(--ncol), minmax(150px, 1fr)); position: sticky; top: 0; z-index: 3; background: #fff; border-bottom: 1px solid var(--borda); }
+.ag-grade { min-width: calc(56px + var(--ncol) * var(--colmin, 150px)); }
+.ag-cab { display: grid; grid-template-columns: 56px repeat(var(--ncol), minmax(var(--colmin, 150px), 1fr)); position: sticky; top: 0; z-index: 3; background: #fff; border-bottom: 1px solid var(--borda); }
 .ag-canto { position: sticky; left: 0; background: #fff; }
 .ag-cab-col { padding: 10px 8px; font-weight: 700; font-size: 13px; text-align: center; border-left: 1px solid var(--borda); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ag-cab-col.hoje { background: var(--azul-claro); }
-.ag-corpo { display: grid; grid-template-columns: 56px repeat(var(--ncol), minmax(150px, 1fr)); }
+.ag-corpo { display: grid; grid-template-columns: 56px repeat(var(--ncol), minmax(var(--colmin, 150px), 1fr)); }
 .ag-regua { position: sticky; left: 0; z-index: 2; background: #fff; border-right: 1px solid var(--borda); }
 .ag-regua span { position: absolute; right: 8px; transform: translateY(-7px); font-size: 11px; color: var(--muted); }
 .ag-regua span:first-child { transform: none; }
@@ -255,6 +255,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(var(--sombra
   background: color-mix(in srgb, var(--cor) 16%, #fff); border-left: 4px solid var(--cor); box-shadow: 0 1px 2px rgba(16,38,58,.08); }
 .ag-ev:hover { box-shadow: 0 3px 10px rgba(16,38,58,.18); z-index: 2; }
 .ag-ev-l1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag-ev.estreito { padding: 3px 4px; font-size: 11px; }
 .ag-ev-l2 { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ag-ev.st-confirmado { background: color-mix(in srgb, var(--cor) 26%, #fff); }
 .ag-ev.st-concluido { opacity: .6; }
