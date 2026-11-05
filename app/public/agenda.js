@@ -368,7 +368,7 @@ function modalConcluir(a, formaSugerida) {
       <p><b>${esc(a.cliente_nome || '')}</b> · ${esc(a.servico_nome || 'atendimento')} · <b>${brl(a.valor)}</b></p>
       <label class="check"><input type="radio" name="op" value="pago" checked> <b>Pagou agora</b></label>
       <div style="margin:-2px 0 10px 24px" id="cc-forma"><select name="forma">${[['dinheiro', 'Dinheiro'], ['pix', 'Pix'], ['debito', 'Cartão de débito'], ['cartao', 'Cartão de crédito']].map(([k, n]) => `<option value="${k}" ${k === formaSugerida ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-      <label class="check ${podeFiado ? '' : 'muted'}"><input type="radio" name="op" value="fiado" ${podeFiado ? '' : 'disabled'}> <b>Pendurar na conta (fiado)</b>${podeFiado ? ': entra na próxima cobrança do cliente' : ': cadastre o WhatsApp do cliente para poder pendurar'}</label>
+      <label class="check ${podeFiado ? '' : 'muted'}"><input type="radio" name="op" value="fiado" ${podeFiado ? '' : 'disabled'}> <span><b>Pendurar na conta (fiado)</b>${podeFiado ? ': entra na próxima cobrança do cliente' : ': cadastre o WhatsApp do cliente para poder pendurar'}</span></label>
       <label class="check"><input type="radio" name="op" value="aberto"> Ainda não pagou (resolvo depois)</label>
       <p class="erro-txt" id="cc-erro"></p>
     </div>

@@ -785,7 +785,7 @@ async function pgConfig(el) {
         </div>
         <div class="cartao pad" style="margin-top:14px">
           <h3>Agendamento online (link para o cliente)</h3>
-          <label class="check"><input type="checkbox" name="online_ativo" ${c.online_ativo ? 'checked' : ''}> <b>Deixar os clientes marcarem horário sozinhos pelo link</b></label>
+          <label class="check"><input type="checkbox" name="online_ativo" ${c.online_ativo ? 'checked' : ''}> <span><b>Deixar os clientes marcarem horário sozinhos pelo link</b></span></label>
           <div class="aviso info pequeno">Link para mandar aos clientes e colocar no Instagram: <b><a href="${location.origin}/agendar" target="_blank">${location.origin}/agendar</a></b> <button type="button" class="btn mini" id="copiar-link">Copiar</button></div>
           <div class="linha"><label>Antecedência mínima (min)<input type="number" name="online_antecedencia_min" min="0" step="15" value="${c.online_antecedencia_min}"><div class="ajuda">Ex.: 60 = não deixa marcar para daqui a menos de 1 hora.</div></label>
             <label>Até quantos dias à frente<input type="number" name="online_dias" min="1" max="90" value="${c.online_dias}"></label></div>

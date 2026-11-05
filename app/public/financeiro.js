@@ -208,9 +208,9 @@ async function modalConsumo(cliente, aoSalvar) {
       <div class="linha3"><label>O que foi<input name="descricao" required placeholder="ex.: Corte"></label>
         <label>Valor (R$)<input name="valor" inputmode="decimal" required></label>
         <label>Data<input type="date" name="data" value="${hojeCx()}"></label></div>
-      <label class="check"><input type="radio" name="modo" value="agora" checked> <b>Cobrar agora</b>: gera uma cobrança com vencimento hoje</label>
+      <label class="check"><input type="radio" name="modo" value="agora" checked> <span><b>Cobrar agora</b>: gera uma cobrança com vencimento hoje</span></label>
       <label class="check" id="cs-enviar-l" style="margin-left:24px"><input type="checkbox" name="enviar" checked> Mandar no WhatsApp com o Pix</label>
-      <label class="check"><input type="radio" name="modo" value="pendurar"> <b>Pendurar na conta (fiado)</b>: ${cliente.forma === 'avulso' ? 'fica anotado até você cobrar o fiado' : 'entra na próxima cobrança do cliente'}</label>
+      <label class="check"><input type="radio" name="modo" value="pendurar"> <span><b>Pendurar na conta (fiado)</b>: ${cliente.forma === 'avulso' ? 'fica anotado até você cobrar o fiado' : 'entra na próxima cobrança do cliente'}</span></label>
       <p class="erro-txt" id="cs-erro"></p>
     </div>
     <div class="modal-rodape"><button type="button" class="btn" data-fechar>Cancelar</button><button class="btn primario">Lançar</button></div></form>`);
