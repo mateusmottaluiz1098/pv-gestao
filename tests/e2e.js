@@ -1,0 +1,153 @@
+// Teste de ponta a ponta do PV Gestão (roda dentro do container, contra http://127.0.0.1:3000)
+const BASE = 'http://127.0.0.1:3000';
+let cookie = '';
+let falhas = 0;
+async function api(m, url, body, semLogin) {
+  const r = await fetch(BASE + url, { method: m, headers: { 'Content-Type': 'application/json', ...(semLogin ? {} : { cookie }) }, body: body ? JSON.stringify(body) : undefined });
+  const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+  const t = await r.text(); let d; try { d = JSON.parse(t); } catch { d = t; }
+  if (!r.ok) throw new Error(`${m} ${url} -> ${r.status} ${JSON.stringify(d)}`);
+  return d;
+}
+function ok(cond, msg, extra) { if (cond) console.log('  ✓', msg); else { falhas++; console.log('  ✗', msg, extra !== undefined ? JSON.stringify(extra) : ''); } }
+const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+const add = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const dow = (d) => new Date(d + 'T12:00:00Z').getUTCDay();
+
+(async () => {
+  console.log('LOGIN'); await api('POST', '/api/login', { login: 'admin', senha: process.env.SENHA_TESTE });
+  console.log('CADASTROS');
+  const sv = await api('POST', '/api/agenda/servicos', { nome: 'Corte', duracao_min: 30, preco: '40', ativo: true });
+  const pr = await api('POST', '/api/agenda/profissionais', { nome: 'Carlos', cor: '#31b2e8', comissao_pct: '50', ativo: true, expediente: { dias: [0, 1, 2, 3, 4, 5, 6], inicio: '00:00', fim: '23:30' } });
+  ok(sv.id && pr.id, 'serviço e profissional');
+
+  console.log('1) SEMANAL');
+  const ds = (dow(hoje) + 1) % 7;
+  const sem = await api('POST', '/api/clientes', { nome: 'Joao Semanal', telefone: '51 99111-1111', forma: 'semanal', dia_semana: ds, valor: '50', ativo: true });
+  let ficha = await api('GET', `/api/clientes/${sem.id}`);
+  ok(ficha.dia_semana === ds && ficha.primeiro_vencimento === add(hoje, 1), 'primeiro vencimento = amanhã', [ficha.dia_semana, ficha.primeiro_vencimento]);
+  ok(ficha.cobrancas.length === 2 && ficha.cobrancas.every((c) => c.valor === 50), 'gera 2 cobranças semanais (horizonte 10 dias)', ficha.cobrancas.map((c) => [c.vencimento, c.valor]));
+  const qz = await api('POST', '/api/clientes', { nome: 'Ana Quinzenal', telefone: '51 99222-2222', forma: 'quinzenal', primeiro_vencimento: add(hoje, -14), valor: '80', ativo: true });
+  ficha = await api('GET', `/api/clientes/${qz.id}`);
+  ok(ficha.cobrancas.length === 2, 'quinzenal com início no passado: gera a vencida e a de hoje', ficha.cobrancas.map((c) => c.vencimento));
+  // editar valor da semanal -> futuras recalculadas
+  await api('PUT', `/api/clientes/${sem.id}`, { ...sem, telefone: sem.telefone, valor: '55', dia_semana: ds, primeiro_vencimento: sem.primeiro_vencimento, ativo: true });
+  ficha = await api('GET', `/api/clientes/${sem.id}`);
+  ok(ficha.cobrancas.length === 2 && ficha.cobrancas.every((c) => c.valor === 55), 'editar valor recalcula as semanais futuras', ficha.cobrancas.map((c) => [c.vencimento, c.valor]));
+  const prev = await api('GET', `/api/cobrancas/${ficha.cobrancas[0].id}/previa`);
+  ok(/semana de/.test(prev.texto), 'mensagem usa {descricao} = semana de dd/mm', prev.texto.slice(0, 120));
+
+  console.log('2) FIADO / AVULSO');
+  const men = await api('POST', '/api/clientes', { nome: 'Pedro Mensal', telefone: '51 99333-3333', forma: 'mensal', dia_vencimento: 28, valor: '100', ativo: true });
+  let r = await api('POST', `/api/clientes/${men.id}/consumos`, { descricao: 'Corte', valor: '40', modo: 'pendurar' });
+  ok(r.anexado_em, 'pendurar no mensal entra na próxima cobrança', r);
+  ficha = await api('GET', `/api/clientes/${men.id}`);
+  const prox = ficha.cobrancas.filter((c) => c.status === 'aberto' && c.vencimento >= hoje).sort((a, b) => a.vencimento.localeCompare(b.vencimento))[0];
+  ok(prox && prox.valor === 140, 'cobrança do mês passou de 100 para 140', prox);
+  await api('PUT', `/api/clientes/${men.id}`, { ...men, valor: '110', ativo: true });
+  ficha = await api('GET', `/api/clientes/${men.id}`);
+  const prox2 = ficha.cobrancas.find((c) => c.id === prox.id);
+  ok(prox2.valor === 150, 'editar mensalidade mantém o fiado somado (110+40)', prox2);
+  r = await api('POST', `/api/clientes/${men.id}/consumos`, { descricao: 'Barba', valor: '25', modo: 'agora', enviar: false });
+  ok(r.cobranca && r.cobranca.tipo === 'avulsa' && r.cobranca.valor === 25 && r.cobranca.vencimento === hoje, 'cobrar agora gera avulsa vencendo hoje', r.cobranca);
+  const cons = await api('GET', `/api/clientes/${men.id}/consumos`);
+  ok(cons.length === 2, 'lista de consumos', cons.length);
+  // excluir o pendurado -> volta 110
+  await api('DELETE', `/api/consumos/${cons.find((c) => c.descricao === 'Corte').id}`);
+  ficha = await api('GET', `/api/clientes/${men.id}`);
+  ok(ficha.cobrancas.find((c) => c.id === prox.id).valor === 110, 'excluir lançamento tira o valor da cobrança');
+
+  const av = await api('POST', '/api/clientes', { nome: 'Lucas Avulso', telefone: '51 99444-4444', forma: 'avulso', ativo: true });
+  ficha = await api('GET', `/api/clientes/${av.id}`);
+  ok(ficha.cobrancas.length === 0, 'cliente só avulso não gera cobrança fixa');
+  await api('POST', `/api/clientes/${av.id}/consumos`, { descricao: 'Corte', valor: '40', modo: 'pendurar' });
+  await api('POST', `/api/clientes/${av.id}/consumos`, { descricao: 'Sobrancelha', valor: '15', modo: 'pendurar' });
+  const lista = await api('GET', '/api/clientes');
+  ok(lista.find((c) => c.id === av.id).fiado_pendente === 55, 'lista mostra fiado pendente 55');
+  r = await api('POST', `/api/clientes/${av.id}/fiado/cobrar`, { enviar: false });
+  ok(r.cobranca.valor === 55 && /2 consumos/.test(r.cobranca.descricao), 'cobrar fiado junta tudo numa cobrança', r.cobranca);
+
+  console.log('3) AGENDA: concluir pago e pendurar');
+  const h1 = `${hoje}T07:00`, h2 = `${hoje}T07:30`;
+  const a1 = await api('POST', '/api/agenda', { profissional_id: pr.id, servico_id: sv.id, inicio: h1, duracao_min: 30, cliente_nome: 'Rafael', telefone: '51 99555-5555', valor: '40', enviar_confirmacao: false });
+  const a2 = await api('POST', '/api/agenda', { profissional_id: pr.id, servico_id: sv.id, inicio: h2, duracao_min: 30, cliente_nome: 'Bruno Novo', telefone: '51 99666-6666', valor: '40', enviar_confirmacao: false });
+  r = await api('POST', `/api/agenda/${a1.id}/status`, { status: 'concluido', pago: true, forma_pagamento: 'pix' });
+  ok(r.pago && r.comissao_valor === 20 && r.pago_em, 'concluído pago: comissão 20 e data de pagamento', [r.pago, r.comissao_valor, r.pago_em]);
+  r = await api('POST', `/api/agenda/${a2.id}/status`, { status: 'concluido', pendurar: true });
+  ok(r.fiado && r.fiado.cliente === 'Bruno Novo' && r.forma_pagamento === 'fiado' && !r.pago, 'pendurar cria cliente "só avulso" e lança o fiado', r.fiado);
+  try { await api('POST', `/api/agenda/${a2.id}/status`, { status: 'concluido', pendurar: true }); ok(false, 'não deixa pendurar 2x'); } catch { ok(true, 'não deixa pendurar o mesmo atendimento 2x'); }
+  const cli2 = (await api('GET', '/api/clientes')).find((c) => c.nome === 'Bruno Novo');
+  ok(cli2 && cli2.forma === 'avulso' && cli2.fiado_pendente === 40, 'cliente criado com fiado 40', cli2 && [cli2.forma, cli2.fiado_pendente]);
+  const cbB = await api('POST', `/api/clientes/${cli2.id}/fiado/cobrar`, { enviar: false });
+  await api('POST', `/api/cobrancas/${cbB.cobranca.id}/pagar`, { valor: '40', forma: 'dinheiro', agradecer: false });
+  const agB = (await api('GET', `/api/agenda?de=${hoje}&ate=${hoje}`)).find((a) => a.id === a2.id);
+  ok(agB.pago === true, 'pagar a cobrança do fiado marca o atendimento como pago');
+
+  console.log('4) PRODUTOS');
+  const pd = await api('POST', '/api/produtos', { nome: 'Pomada', preco: '30', comissao_pct: '10', estoque: '5', ativo: true });
+  r = await api('POST', '/api/vendas', { produto_id: pd.id, quantidade: 2, profissional_id: pr.id, forma_pagamento: 'debito' });
+  ok(r.venda.valor_total === 60 && r.venda.comissao_valor === 6, 'venda 2x30 com 10% = comissão 6', r.venda);
+  r = await api('POST', '/api/vendas', { produto_id: pd.id, quantidade: 1, forma_pagamento: 'fiado', cliente_nome: 'Lucas Avulso', telefone: '51 99444-4444' });
+  ok(r.fiado && r.venda.cliente_id === av.id, 'venda fiado vai para a conta do cliente existente');
+  const prods = await api('GET', '/api/produtos');
+  ok(prods[0].estoque === 2, 'estoque baixou 5 -> 2', prods[0].estoque);
+
+  console.log('5) CAIXA');
+  await api('POST', '/api/caixa/movimentos', { tipo: 'saida', descricao: 'Lâminas', valor: '12', forma: 'dinheiro' });
+  const cx = await api('GET', `/api/caixa?data=${hoje}`);
+  console.log('    por forma:', JSON.stringify(cx.por_forma), 'totais:', JSON.stringify(cx.totais));
+  ok(cx.por_forma.pix === 40 && cx.por_forma.debito === 60 && cx.por_forma.dinheiro === 40, 'entradas: pix 40 (agenda), débito 60 (produto), dinheiro 40 (fiado pago)');
+  ok(cx.totais.entradas === 140 && cx.totais.saidas === 12, 'total entradas 140, saídas 12');
+  ok(cx.totais.comissoes === 46, 'comissões do dia: 20+20 (serviços) + 6 (produto) = 46', cx.totais.comissoes);
+  ok(cx.totais.dinheiro_em_caixa === 28, 'dinheiro na gaveta 40-12 = 28', cx.totais.dinheiro_em_caixa);
+  ok(cx.fiado.qtd >= 3, 'fiado do dia aparece', cx.fiado);
+
+  console.log('6) COMISSÕES');
+  const com = await api('GET', `/api/agenda/comissoes?de=${hoje}&ate=${hoje}`);
+  const pc = com.profissionais[0];
+  ok(pc.servicos === 80 && pc.produtos === 60 && pc.comissao === 46 && pc.casa === 94, 'relatório: serviços 80 + produtos 60, comissão 46, casa 94', [pc.servicos, pc.produtos, pc.comissao, pc.casa]);
+
+  console.log('7) LISTAS / PAINEL / COBRANÇAS DO MÊS');
+  const cobs = await api('GET', `/api/cobrancas?mes=${hoje.slice(0, 7)}`);
+  ok(cobs.itens.some((c) => c.tipo === 'avulsa') && cobs.itens.some((c) => c.forma === 'semanal'), 'cobranças do mês incluem avulsas e semanais', cobs.itens.length);
+  const pn = await api('GET', '/api/painel');
+  ok(pn.previsto_mes > 0, 'painel ok', pn.previsto_mes);
+  const csv = await fetch(BASE + `/api/exportar/cobrancas.csv?mes=${hoje.slice(0, 7)}`, { headers: { cookie } }).then((x) => x.text());
+  ok(/Referente a/.test(csv), 'CSV de cobranças com "Referente a"');
+
+  console.log('8) AGENDAMENTO ONLINE');
+  const cfgAntes = await api('GET', '/api/config');
+  await api('PUT', '/api/config', { online_ativo: true, online_antecedencia_min: '60', online_dias: '14' });
+  const pub = await api('GET', '/api/publico/agenda', null, true);
+  ok(pub.ativo && pub.servicos.length === 1 && pub.profissionais.length === 1, 'página pública lista serviços e profissionais');
+  const amanha = add(hoje, 1);
+  const hrs = await api('GET', `/api/publico/agenda/horarios?data=${amanha}&servico_id=${sv.id}`, null, true);
+  ok(hrs.length > 10, 'horários livres de amanhã', hrs.length);
+  r = await api('POST', '/api/publico/agenda', { servico_id: sv.id, data: amanha, hora: hrs[0].hora, nome: 'Cliente Online', telefone: '51 99777-7777' }, true);
+  ok(r.ok && r.profissional === 'Carlos', 'agendou pelo link (sem preferência → Carlos)', r);
+  try { await api('POST', '/api/publico/agenda', { servico_id: sv.id, data: amanha, hora: hrs[0].hora, nome: 'Outro', telefone: '51 99888-8888' }, true); ok(false, 'bloqueia horário ocupado'); }
+  catch (e) { ok(/409/.test(e.message), 'horário ocupado é recusado (409)'); }
+  const hrs2 = await api('GET', `/api/publico/agenda/horarios?data=${amanha}&servico_id=${sv.id}`, null, true);
+  ok(!hrs2.some((x) => x.hora === hrs[0].hora), 'horário some da lista depois de marcado');
+  try { await api('POST', '/api/publico/agenda', { servico_id: sv.id, data: add(hoje, 40), hora: '10:00', nome: 'X', telefone: '51 99888-8888' }, true); ok(false, 'limite de dias'); }
+  catch { ok(true, 'não deixa marcar além do limite de dias'); }
+  try { await api('POST', '/api/publico/agenda', { servico_id: sv.id, data: amanha, hora: hrs[3].hora, nome: 'Robo', telefone: '51 99888-8888', site: 'http://spam' }, true); ok(false, 'anti-robô'); }
+  catch { ok(true, 'campo anti-robô barra envio automático'); }
+  const agOn = (await api('GET', `/api/agenda?de=${amanha}&ate=${amanha}`)).find((a) => a.cliente_nome === 'Cliente Online');
+  ok(agOn && agOn.origem === 'online' && agOn.valor === 40, 'aparece na agenda marcado como online, com preço do serviço');
+  await api('PUT', '/api/config', { online_ativo: cfgAntes.online_ativo });
+  const pub2 = await api('GET', '/api/publico/agenda', null, true);
+  ok(pub2.ativo === false && !pub2.servicos, 'desligado: página não mostra nada');
+
+  console.log('9) RETORNO');
+  const rp = await api('GET', '/api/retorno/previa');
+  ok(typeof rp.candidatos === 'number' && /dias/.test(rp.exemplo), 'prévia do retorno', rp.exemplo.slice(0, 80));
+
+  console.log('10) DESFAZER PAGAMENTO DO FIADO');
+  await api('POST', `/api/cobrancas/${cbB.cobranca.id}/desfazer`);
+  const agB2 = (await api('GET', `/api/agenda?de=${hoje}&ate=${hoje}`)).find((a) => a.id === a2.id);
+  ok(agB2.pago === false, 'desfazer volta o atendimento para não pago');
+
+  console.log(falhas ? `\nFALHAS: ${falhas}` : '\nTUDO OK');
+  process.exit(falhas ? 1 : 0);
+})().catch((e) => { console.error('ERRO:', e.message); process.exit(2); });
