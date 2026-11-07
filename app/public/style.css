@@ -227,6 +227,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(var(--sombra
 .mod-item span { display: flex; flex-direction: column; }
 .mod-item small { color: var(--muted); font-weight: 400; font-size: 11.5px; }
 .mod-item:has(input:checked) { border-color: var(--azul-3); background: var(--azul-claro); }
+.mod-fixo { display: flex; gap: 9px; background: #f6f9fb; }
+.mod-fixo > .ic { color: var(--verde); width: 18px; height: 18px; margin-top: 1px; }
 
 /* ---------- Gráficos (relatórios) ---------- */
 .grafico { position: relative; }

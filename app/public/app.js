@@ -173,7 +173,7 @@ const ACOES_PERM = {
   '#ag-pac': 'agenda_config', '#cli-pacotes': 'agenda_config', '#vender-pacote': 'pagamentos', '[data-cancelar-pac]': 'pagamentos',
   '#wa-conectar': 'whatsapp', '#wa-sair': 'whatsapp', '#wa-teste': 'whatsapp',
   '#lancar-consumo': 'pagamentos', '#cobrar-fiado': 'pagamentos', '[data-del-consumo]': 'pagamentos',
-  '#cx-venda': 'pagamentos', '[data-del-venda]': 'pagamentos', '#cx-mov': 'financeiro', '[data-del-mov]': 'financeiro', '#cx-prod': 'agenda_config',
+  '.cfg-regua': 'configuracoes', '#cx-venda': 'pagamentos', '[data-del-venda]': 'pagamentos', '#cx-mov': 'financeiro', '[data-del-mov]': 'financeiro', '#cx-prod': 'agenda_config',
 };
 function aplicarPermissoes(raiz) {
   for (const [sel, perm] of Object.entries(ACOES_PERM)) {
@@ -181,6 +181,10 @@ function aplicarPermissoes(raiz) {
   }
 }
 // no celular as tabelas viram cartões: cada célula ganha o nome da coluna
+// atalhos "Régua de avisos": abrem Configurações já na aba da régua
+document.addEventListener('click', (e) => {
+  if (e.target.closest && e.target.closest('.cfg-regua')) { try { localStorage.setItem('cfg_aba', 'cobranca'); } catch (er) { /* sem storage */ } }
+}, true);
 function rotularTabelas(raiz) {
   $$('table', raiz).forEach((t) => {
     if (t.closest('td') || !t.tHead) return;
@@ -652,7 +656,7 @@ async function pgCobrancas(el) {
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Cobranças</h1><div class="muted">Mensalidades, semanais, parcelas e avulsas do mês.</div></div>
       <div class="acoes"><button class="btn" id="mes-ant" aria-label="Mês anterior">${ic('esquerda')}</button><b style="min-width:140px;text-align:center">${MESES[m - 1]} ${y}</b><button class="btn" id="mes-prox" aria-label="Próximo mês">${ic('direita')}</button>
-      <a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">${ic('baixar')} CSV</a></div></div>
+      <a class="btn cfg-regua" href="#/config">${ic('whatsapp')} Régua de avisos</a><a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">${ic('baixar')} CSV</a></div></div>
     ${d.anteriores.n ? `<div class="aviso">Há ${d.anteriores.n} cobrança(s) de meses anteriores ainda em aberto (${brl(d.anteriores.v)}). <a href="#" id="ver-atrasadas">Ver lista →</a></div>` : ''}
     <div class="grade g4">
       <div class="cartao kpi"><div class="rotulo">Previsto</div><div class="valor">${brl(r.previsto)}</div><div class="det">${r.qtd} cobrança(s)</div></div>
@@ -737,7 +741,8 @@ async function pgComprovantes(el) {
 async function pgWhatsapp(el) {
   const st = await api('/whatsapp/estado');
   el.innerHTML = `
-    <div class="cabecalho"><div><h1>WhatsApp</h1><div class="muted">Conexão do número que envia as cobranças.</div></div></div>
+    <div class="cabecalho"><div><h1>WhatsApp</h1><div class="muted">Conexão do número que envia as cobranças e os avisos.</div></div>
+      <div class="acoes"><a class="btn cfg-regua" href="#/config">${ic('config')} Régua de avisos</a></div></div>
     <div class="grade g2">
       <div class="cartao pad" id="wa-box"></div>
       <div class="cartao pad">
@@ -824,7 +829,7 @@ const NOMES_MODULO = {
 // organiza os quadros da configuração em abas (o formulário continua um só)
 const ABAS_CFG = [
   ['negocio', 'Negócio', 'painel', /^Negócio$/i],
-  ['cobranca', 'Cobrança e Pix', 'cobrancas', /Empresa|Régua|Envio automático|Após o pagamento|comprovante|avulsa/i],
+  ['cobranca', 'Régua de avisos e Pix', 'whatsapp', /Empresa|Régua|Envio automático|Após o pagamento|comprovante|avulsa/i],
   ['agenda', 'Agenda', 'agenda', /^Agenda$|Lista de espera/i],
   ['online', 'Agendamento online', 'link', /Agendamento online/i],
   ['retorno', 'Retorno de clientes', 'whatsapp', /Retorno/i],
@@ -872,7 +877,9 @@ async function pgConfig(el) {
       <h3>Negócio</h3>
       <label>Ramo do negócio<select name="ramo">${Object.entries(c.ramos || {}).map(([k, r]) => `<option value="${k}" ${k === c.ramo ? 'selected' : ''}>${esc(r.nome)}</option>`).join('')}</select></label>
       <p class="muted pequeno" id="cfg-ramo-ex" style="margin-top:-6px"></p>
-      <div class="pequeno" style="font-weight:600;color:#3c5163;margin:6px 0 8px">Módulos ligados</div>
+      <div class="pequeno" style="font-weight:600;color:#3c5163;margin:6px 0 8px">Sempre ligado, em todos os ramos</div>
+      <div class="mod-grade" style="margin-bottom:14px">${[['clientes', 'Clientes', 'cadastro, ficha, consumo avulso e fiado'], ['cobrancas', 'Cobranças', 'mensal, semanal, quinzenal, carnê e avulsa'], ['whatsapp', 'WhatsApp e régua de avisos', 'lembretes antes, no dia e depois do vencimento'], ['pix', 'Pix e comprovantes', 'Pix copia e cola e conferência dos comprovantes']].map(([i, n, d]) => `<div class="mod-item mod-fixo">${ic(i)}<span><b>${n}</b><small>${d}</small></span></div>`).join('')}</div>
+      <div class="pequeno" style="font-weight:600;color:#3c5163;margin:6px 0 8px">Módulos do ramo</div>
       <div class="mod-grade">${Object.entries(NOMES_MODULO).map(([k, [n, d]]) => `<label class="check mod-item"><input type="checkbox" name="mod_${k}" ${c.modulos && c.modulos[k] !== false ? 'checked' : ''}> <span><b>${n}</b><small>${d}</small></span></label>`).join('')}</div>
       <p class="muted pequeno">Ao trocar o ramo, os módulos mudam para o padrão dele. Você pode ligar ou desligar cada um. O que fica desligado some do menu.</p>
       <button type="button" class="btn mini" id="cfg-msgs-ramo">Usar as mensagens prontas deste ramo</button>
