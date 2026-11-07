@@ -248,7 +248,7 @@ async function caixaDoDia(data) {
     `SELECT a.id, a.valor, a.forma_pagamento, a.cliente_nome, p.nome AS profissional, s.nome AS servico,
             to_char(COALESCE(a.pago_em, a.inicio) AT TIME ZONE '${TZ}', 'HH24:MI') AS hora
        FROM agendamentos a JOIN profissionais p ON p.id = a.profissional_id LEFT JOIN servicos s ON s.id = a.servico_id
-      WHERE a.pago AND COALESCE(a.forma_pagamento, '') <> 'fiado' AND a.status <> 'cancelado'
+      WHERE a.pago AND COALESCE(a.forma_pagamento, '') NOT IN ('fiado', 'pacote') AND a.status <> 'cancelado'
         AND (COALESCE(a.pago_em, a.inicio) AT TIME ZONE '${TZ}')::date = $1`, [data]);
   for (const a of ags) entradas.push({ origem: 'atendimento', hora: a.hora, descricao: a.servico || 'Atendimento', cliente: a.cliente_nome, profissional: a.profissional, forma: a.forma_pagamento || 'dinheiro', valor: Number(a.valor || 0) });
   const { rows: cobs } = await q(
@@ -380,7 +380,7 @@ function rotas(app, { rota, pode }) {
 async function recebidoNoPeriodo(de, ate) {
   const [{ rows: a }, { rows: v }, { rows: m }] = await Promise.all([
     q(`SELECT COUNT(*)::int n, COALESCE(SUM(valor), 0) v FROM agendamentos
-        WHERE pago AND COALESCE(forma_pagamento, '') <> 'fiado' AND status <> 'cancelado'
+        WHERE pago AND COALESCE(forma_pagamento, '') NOT IN ('fiado', 'pacote') AND status <> 'cancelado'
           AND (COALESCE(pago_em, inicio) AT TIME ZONE '${TZ}')::date BETWEEN $1 AND $2`, [de, ate]),
     q("SELECT COUNT(*)::int n, COALESCE(SUM(valor_total), 0) v FROM vendas WHERE forma_pagamento <> 'fiado' AND data BETWEEN $1 AND $2", [de, ate]),
     q("SELECT COALESCE(SUM(valor), 0) v FROM caixa_movimentos WHERE tipo = 'entrada' AND data BETWEEN $1 AND $2", [de, ate]),
@@ -388,4 +388,4 @@ async function recebidoNoPeriodo(de, ate) {
   return { atendimentos: { n: a[0].n, v: Number(a[0].v) }, vendas: { n: v[0].n, v: Number(v[0].v) }, outros: Number(m[0].v) };
 }
 
-module.exports = { iniciar, rotas, lancarConsumo, pendurarAgendamento, registrarVenda, caixaDoDia, recebidoNoPeriodo, clientePorTelefone, FORMAS };
+module.exports = { iniciar, rotas, lancarConsumo, pendurarAgendamento, registrarVenda, caixaDoDia, recebidoNoPeriodo, enviarAvulsa, clientePorTelefone, FORMAS };

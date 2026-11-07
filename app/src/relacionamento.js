@@ -26,7 +26,7 @@ function erro(status, msg) { const e = new Error(msg); e.status = status; return
 
 function linkAgendamento(c) {
   const base = process.env.URL_PUBLICA || c._url_publica || '';
-  return c.online_ativo && base ? `${base.replace(/\/$/, '')}/agendar` : '';
+  return c.online_ativo && c.modulos.online !== false && base ? `${base.replace(/\/$/, '')}/agendar` : '';
 }
 
 // ---------- Retorno: clientes que não aparecem há X dias ----------
@@ -75,7 +75,7 @@ async function tickRetorno() {
   rodandoRetorno = true;
   try {
     const c = await cfg.obter();
-    if (!c.retorno_ativo) return;
+    if (!c.retorno_ativo || c.modulos.retorno === false) return;
     const h = U.horaAgora();
     if (h < (c.retorno_hora || '10:00') || h < (c.janela_inicio || '08:00') || h > (c.janela_fim || '20:00')) return;
     const { rows: u } = await q("SELECT valor FROM config WHERE chave = '_retorno_ultima'");
@@ -118,8 +118,9 @@ function limitar(ip) {
 async function dadosPublicos() {
   const c = await cfg.obter();
   const logo = await cfg.obterLogo();
-  const base = { ativo: !!c.online_ativo, empresa: c.empresa, sistema_nome: c.sistema_nome, tema: c.tema, tem_logo: !!logo, logo_versao: logo ? logo.versao : null };
-  if (!c.online_ativo) return base;
+  const ligado = !!c.online_ativo && c.modulos.online !== false && c.modulos.agenda !== false;
+  const base = { ativo: ligado, empresa: c.empresa, sistema_nome: c.sistema_nome, tema: c.tema, tem_logo: !!logo, logo_versao: logo ? logo.versao : null, termos: c.termos };
+  if (!ligado) return base;
   const { rows: servicos } = await q('SELECT id, nome, duracao_min, preco FROM servicos WHERE ativo ORDER BY nome');
   const { rows: profs } = await q('SELECT id, nome, cor, expediente FROM profissionais WHERE ativo ORDER BY ordem, nome');
   return {
@@ -137,7 +138,7 @@ function dataValida(c, data) {
 // horários livres para o cliente: de um profissional ou de qualquer um (primeiro livre)
 async function horariosPublicos(data, servicoId, profId) {
   const c = await cfg.obter();
-  if (!c.online_ativo) throw erro(403, 'Agendamento online desativado');
+  if (!c.online_ativo || c.modulos.online === false) throw erro(403, 'Agendamento online desativado');
   if (!dataValida(c, data)) return [];
   const { rows } = await q('SELECT * FROM servicos WHERE id = $1 AND ativo', [servicoId]);
   if (!rows[0]) throw erro(400, 'Escolha o serviço');
@@ -149,7 +150,7 @@ async function horariosPublicos(data, servicoId, profId) {
 
 async function agendarPublico(b, ip) {
   const c = await cfg.obter();
-  if (!c.online_ativo) throw erro(403, 'Agendamento online desativado');
+  if (!c.online_ativo || c.modulos.online === false) throw erro(403, 'Agendamento online desativado');
   if (b.site) throw erro(400, 'Requisição inválida'); // campo escondido anti-robô
   if (!limitar(ip)) throw erro(429, 'Muitas tentativas. Tente de novo mais tarde ou chame no WhatsApp.');
   const nome = String(b.nome || '').trim().slice(0, 80);

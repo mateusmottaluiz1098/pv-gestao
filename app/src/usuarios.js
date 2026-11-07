@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS usuarios (
   versao_sessao INT NOT NULL DEFAULT 1,
   ultimo_acesso TIMESTAMPTZ,
   criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
-);`;
+);
+-- usuário vinculado a um profissional: vê só a própria agenda e comissões
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS profissional_id INT;`;
 
 function hashSenha(senha) {
   const sal = crypto.randomBytes(16).toString('hex');
@@ -61,11 +63,15 @@ async function iniciar(senhaInicial) {
   }
 }
 
+// usuário "profissional": não é admin e está ligado a um profissional da agenda
+const ehProf = (u) => !!u && !u.admin && !!u.profissional_id;
+const PERM_PROF = ['agenda', 'financeiro'];
+
 function publico(u) {
   if (!u) return null;
   return {
-    id: u.id, nome: u.nome, login: u.login, admin: u.admin, ativo: u.ativo,
-    permissoes: u.admin ? TODAS : (u.permissoes || []).filter((p) => TODAS.includes(p)),
+    id: u.id, nome: u.nome, login: u.login, admin: u.admin, ativo: u.ativo, profissional_id: u.profissional_id || null,
+    permissoes: u.admin ? TODAS : ehProf(u) ? PERM_PROF : (u.permissoes || []).filter((p) => TODAS.includes(p)),
     ultimo_acesso: u.ultimo_acesso, criado_em: u.criado_em,
   };
 }
@@ -84,6 +90,7 @@ async function autenticar(login, senha) {
 }
 
 function tem(u, perm) {
+  if (ehProf(u)) return PERM_PROF.includes(perm);
   return !!u && (u.admin || (u.permissoes || []).includes(perm));
 }
 
@@ -99,7 +106,8 @@ function validar(b, novo) {
   if (!/^[a-z0-9._-]{3,30}$/.test(login)) throw Object.assign(new Error('Login deve ter de 3 a 30 letras/números, sem espaço'), { status: 400 });
   if ((novo || b.senha) && String(b.senha || '').length < 6) throw Object.assign(new Error('A senha precisa ter pelo menos 6 caracteres'), { status: 400 });
   const permissoes = Array.isArray(b.permissoes) ? b.permissoes.filter((p) => TODAS.includes(p)) : [];
-  return { nome, login, senha: b.senha, admin: !!b.admin, ativo: b.ativo !== false, permissoes };
+  const profissional_id = !b.admin && parseInt(b.profissional_id, 10) > 0 ? parseInt(b.profissional_id, 10) : null;
+  return { nome, login, senha: b.senha, admin: !!b.admin, ativo: b.ativo !== false, permissoes, profissional_id };
 }
 
 async function admins(excetoId) {
@@ -111,8 +119,8 @@ async function criar(b) {
   const d = validar(b, true);
   try {
     const { rows } = await q(
-      'INSERT INTO usuarios (nome, login, senha_hash, admin, permissoes, ativo) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [d.nome, d.login, hashSenha(d.senha), d.admin, JSON.stringify(d.permissoes), d.ativo]
+      'INSERT INTO usuarios (nome, login, senha_hash, admin, permissoes, ativo, profissional_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [d.nome, d.login, hashSenha(d.senha), d.admin, JSON.stringify(d.permissoes), d.ativo, d.profissional_id]
     );
     return publico(rows[0]);
   } catch (e) {
@@ -133,10 +141,10 @@ async function atualizar(id, b, quem) {
   }
   const trocaSenha = d.senha && String(d.senha).length >= 6;
   // ao trocar senha, permissões ou desativar, derruba as sessões abertas desse usuário
-  const derruba = trocaSenha || !d.ativo || d.admin !== atual.admin;
+  const derruba = trocaSenha || !d.ativo || d.admin !== atual.admin || (d.profissional_id || null) !== (atual.profissional_id || null);
   try {
     const { rows } = await q(
-      `UPDATE usuarios SET nome=$1, login=$2, admin=$3, permissoes=$4, ativo=$5
+      `UPDATE usuarios SET nome=$1, login=$2, admin=$3, permissoes=$4, ativo=$5, profissional_id=${d.profissional_id ? Number(d.profissional_id) : 'NULL'}
          ${trocaSenha ? ', senha_hash=$7' : ''} ${derruba ? ', versao_sessao = versao_sessao + 1' : ''}
        WHERE id=$6 RETURNING *`,
       trocaSenha
@@ -166,4 +174,4 @@ async function trocarPropriaSenha(id, atualSenha, nova) {
   return porId(id);
 }
 
-module.exports = { PERMISSOES, TODAS, iniciar, porId, autenticar, tem, listar, criar, atualizar, excluir, trocarPropriaSenha, publico };
+module.exports = { PERMISSOES, TODAS, ehProf, iniciar, porId, autenticar, tem, listar, criar, atualizar, excluir, trocarPropriaSenha, publico };

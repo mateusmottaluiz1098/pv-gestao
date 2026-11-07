@@ -158,6 +158,84 @@ const dow = (d) => new Date(d + 'T12:00:00Z').getUTCDay();
   const bk = await api('GET', '/api/exportar/backup.json');
   ok(Array.isArray(bk.agendamentos) && bk.agendamentos.length > 0 && Array.isArray(bk.profissionais) && Array.isArray(bk.servicos) && Array.isArray(bk.comprovantes), 'backup inclui agenda, profissionais, serviços e comprovantes', Object.keys(bk));
 
+  console.log('12) RAMOS E MÓDULOS');
+  let cf = await api('PUT', '/api/config', { ramo: 'servicos' });
+  ok(cf.ramo === 'servicos' && cf.modulos.agenda === false && cf.modulos.caixa === false && cf.termos.profissional === 'técnico', 'piscinas: só cobrança, técnico', [cf.modulos, cf.termos]);
+  ok(/visita/.test(cf.agenda_msg_confirmacao), 'piscinas: mensagem de visita');
+  cf = await api('PUT', '/api/config', { mod_agenda: true, mod_caixa: false, mod_produtos: false, mod_comissoes: false, mod_online: false, mod_retorno: false, mod_pacotes: false, mod_espera: false, mod_relatorios: true });
+  ok(cf.modulos.agenda === true && cf.modulos.caixa === false, 'liga um módulo isolado', cf.modulos);
+  cf = await api('PUT', '/api/config', { ramo: 'escola' });
+  ok(cf.termos.cliente === 'aluno' && cf.modulos.pacotes === true && cf.modulos.agenda === false, 'academia: aluno, pacotes, sem agenda', [cf.termos, cf.modulos]);
+  cf = await api('PUT', '/api/config', { ramo: 'barbearia' });
+  ok(Object.values(cf.modulos).every(Boolean) && /💈/.test(cf.agenda_msg_confirmacao), 'barbearia: tudo ligado e mensagem de barbearia', cf.modulos);
+
+  console.log('13) PACOTES E ASSINATURA');
+  const pk = await api('POST', '/api/pacotes', { nome: 'Clube 4 cortes', quantidade: 4, valor: '120', validade_dias: 30, servico_id: sv.id, recorrente: true });
+  const cxP0 = await api('GET', `/api/caixa?data=${hoje}`);
+  const venda = await api('POST', `/api/clientes/${sem.id}/pacotes`, { pacote_id: pk.id, forma_pagamento: 'pix' });
+  const cxP1 = await api('GET', `/api/caixa?data=${hoje}`);
+  ok(venda.pacote.quantidade === 4 && cxP1.totais.entradas === +(cxP0.totais.entradas + 120).toFixed(2), 'venda do pacote entra no caixa (120)', [cxP0.totais.entradas, cxP1.totais.entradas]);
+  let saldoP = await api('GET', `/api/pacotes/cliente?cliente_id=${sem.id}`);
+  ok(saldoP.length === 1 && saldoP[0].saldo === 4, 'cliente com 4 usos', saldoP.map((x) => x.saldo));
+  const hAg = add(hoje, 2) + 'T10:00';
+  const agP = await api('POST', '/api/agenda', { profissional_id: pr.id, servico_id: sv.id, cliente_id: sem.id, cliente_nome: 'Joao Semanal', telefone: '51 99111-1111', inicio: hAg, duracao_min: 30, valor: '40', enviar_confirmacao: false });
+  const usado = await api('POST', `/api/agenda/${agP.id}/status`, { status: 'concluido', usar_pacote: saldoP[0].id });
+  ok(usado.pago && usado.forma_pagamento === 'pacote' && Number(usado.valor) === 30, 'atendimento sai do pacote (valor 120/4 = 30)', [usado.pago, usado.forma_pagamento, usado.valor]);
+  saldoP = await api('GET', `/api/pacotes/cliente?cliente_id=${sem.id}`);
+  ok(saldoP[0].saldo === 3, 'saldo cai para 3', saldoP[0].saldo);
+  let dup = null; try { await api('POST', `/api/agenda/${agP.id}/status`, { status: 'concluido', usar_pacote: saldoP[0].id }); } catch (e) { dup = e.message; }
+  ok(dup && /já foi descontado/.test(dup), 'não desconta duas vezes o mesmo atendimento', dup);
+  await api('POST', `/api/agenda/${agP.id}/status`, { status: 'agendado', pago: false });
+  saldoP = await api('GET', `/api/pacotes/cliente?cliente_id=${sem.id}`);
+  ok(saldoP[0].saldo === 4, 'reabrir o atendimento devolve o uso', saldoP[0].saldo);
+  const vendaC = await api('POST', `/api/clientes/${av.id}/pacotes`, { pacote_id: pk.id, forma_pagamento: 'cobrar' });
+  const fichaAv = await api('GET', `/api/clientes/${av.id}`);
+  ok(vendaC.pacote.cobranca_id && fichaAv.cobrancas.some((x) => x.id === vendaC.pacote.cobranca_id && x.valor === 120), 'pacote "gerar cobrança" cria cobrança de 120');
+
+  console.log('14) LISTA DE ESPERA');
+  // amanhã (já definido acima)
+  const es = await api('POST', '/api/espera', { data: amanha, cliente_nome: 'Paulo Espera', telefone: '51 99777-7777', servico_id: sv.id, hora_de: '08:00', hora_ate: '18:00' });
+  const lst = await api('GET', `/api/espera?data=${amanha}`);
+  const cnt = await api('GET', `/api/espera/contagem?de=${hoje}&ate=${add(hoje, 6)}`);
+  ok(lst.some((x) => x.id === es.id && x.servico_nome === 'Corte') && cnt[amanha] >= 1, 'entra na lista e aparece na contagem', cnt);
+  let semTel = null; try { await api('POST', '/api/espera', { data: amanha, cliente_nome: 'Sem Fone' }); } catch (e) { semTel = e.message; }
+  ok(semTel && /WhatsApp/.test(semTel), 'exige WhatsApp para avisar', semTel);
+  const agE = await api('POST', '/api/agenda', { profissional_id: pr.id, cliente_nome: 'Vai Cancelar', telefone: '51 99888-1111', inicio: amanha + 'T11:00', duracao_min: 30, enviar_confirmacao: false });
+  const canc = await api('POST', `/api/agenda/${agE.id}/status`, { status: 'cancelado' });
+  ok(Array.isArray(canc.espera_avisados), 'cancelar responde quem foi avisado (WhatsApp desligado: ninguém)', canc.espera_avisados);
+  await api('PUT', `/api/espera/${es.id}`, { status: 'marcado' });
+  ok((await api('GET', `/api/espera/contagem?de=${amanha}&ate=${amanha}`))[amanha] === undefined, 'marcado sai da contagem');
+
+  console.log('15) RELATÓRIOS');
+  const rm = await api('GET', '/api/relatorios/mensal?meses=12');
+  const ult = rm.meses[rm.meses.length - 1];
+  ok(rm.meses.length === 12 && ult.total > 0 && ult.qtd_atendimentos > 0, '12 meses, mês atual com entradas e atendimentos', ult);
+  const rpf = await api('GET', `/api/relatorios/profissionais?mes=${hoje.slice(0, 7)}`);
+  ok(rpf.profissionais.some((x) => x.nome === 'Carlos' && x.atendimentos > 0 && x.comissao > 0), 'resultado por profissional', rpf.profissionais.map((x) => [x.nome, x.atendimentos, x.comissao]));
+
+  console.log('16) LOGIN DO PROFISSIONAL');
+  const pr2 = await api('POST', '/api/agenda/profissionais', { nome: 'Outro', cor: '#e0488f', ativo: true, expediente: { dias: [0, 1, 2, 3, 4, 5, 6], inicio: '00:00', fim: '23:30' } });
+  const agOutro = await api('POST', '/api/agenda', { profissional_id: pr2.id, cliente_nome: 'Cliente do Outro', inicio: amanha + 'T15:00', duracao_min: 30, enviar_confirmacao: false });
+  await api('POST', '/api/usuarios', { nome: 'Carlos', login: 'carlos', senha: 'carlos123', profissional_id: pr.id, ativo: true });
+  const cookieAdmin = cookie; cookie = '';
+  await api('POST', '/api/login', { login: 'carlos', senha: 'carlos123' });
+  const eu = await api('GET', '/api/me');
+  ok(eu.profissional_id === pr.id && eu.permissoes.includes('agenda'), 'login do profissional', eu);
+  const agVista = await api('GET', `/api/agenda?de=${hoje}&ate=${add(hoje, 6)}`);
+  ok(agVista.length > 0 && agVista.every((x) => x.profissional_id === pr.id), 'vê só a própria agenda', agVista.map((x) => x.profissional_id));
+  ok((await api('GET', '/api/agenda/profissionais')).length === 1, 'lista de profissionais só com ele');
+  let bloq = null; try { await api('GET', '/api/clientes'); } catch (e) { bloq = e.message; }
+  ok(bloq && /403/.test(bloq), 'não vê clientes nem cobranças', bloq);
+  let bloq2 = null; try { await api('POST', `/api/agenda/${agOutro.id}/status`, { status: 'cancelado' }); } catch (e) { bloq2 = e.message; }
+  ok(bloq2 && /403/.test(bloq2), 'não mexe no horário de outro profissional', bloq2);
+  const meu = await api('POST', '/api/agenda', { profissional_id: pr2.id, cliente_nome: 'Encaixe', inicio: amanha + 'T07:00', duracao_min: 30, enviar_confirmacao: false });
+  ok(meu.profissional_id === pr.id, 'o que ele marca fica na agenda dele', meu.profissional_id);
+  const cfgProf = await api('GET', '/api/config');
+  ok(!('pix_chave' in cfgProf) && !('regua' in cfgProf), 'não vê a chave Pix nem a régua');
+  const comProf = await api('GET', `/api/agenda/comissoes?de=${hoje}&ate=${hoje}`);
+  ok(comProf.profissionais.every((x) => x.profissional_id === pr.id), 'comissões só dele', comProf.profissionais.map((x) => x.profissional_id));
+  cookie = cookieAdmin;
+
   console.log(falhas ? `\nFALHAS: ${falhas}` : '\nTUDO OK');
   process.exit(falhas ? 1 : 0);
 })().catch((e) => { console.error('ERRO:', e.message); process.exit(2); });

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Cria um cliente novo: banco próprio, container próprio e subdomínio
-# Uso: ./scripts/novo-cliente.sh <nome-curto> ["Nome da Empresa"] ["Nome do Sistema"]
-# Ex.: ./scripts/novo-cliente.sh barbearia-ze "Barbearia do Zé"
+# Uso: ./scripts/novo-cliente.sh <nome-curto> ["Nome da Empresa"] ["Nome do Sistema"] [ramo]
+# Ramos: servicos (piscinas e serviços recorrentes), barbearia, salao, escola (academia/cursos), comercio
+# Ex.: ./scripts/novo-cliente.sh barbearia-ze "Barbearia do Zé" "PV Gestão" barbearia
+#      ./scripts/novo-cliente.sh piscinas-ana "Ana Piscinas" "PV Gestão" servicos
 . "$(dirname "$0")/comum.sh"
 carregar_env
 
-SLUG="${1:-}"; EMPRESA="${2:-}"; SISTEMA="${3:-PV Gestão}"
+SLUG="${1:-}"; EMPRESA="${2:-}"; SISTEMA="${3:-PV Gestão}"; RAMO="${4:-barbearia}"
+case "$RAMO" in servicos|barbearia|salao|escola|comercio) ;; *) morrer "Ramo inválido: $RAMO (use servicos, barbearia, salao, escola ou comercio)";; esac
 [ -n "$SLUG" ] || morrer "Informe o nome curto. Ex.: ./scripts/novo-cliente.sh barbearia-ze \"Barbearia do Zé\""
 validar_slug "$SLUG"
 [ -f "clientes/$SLUG.env" ] && morrer "O cliente '$SLUG' já existe."
@@ -26,6 +29,7 @@ cat > "clientes/$SLUG.env" <<EOF
 # Cliente: $EMPRESA  —  https://$SLUG.$BASE_DOMINIO
 EMPRESA_NOME=$EMPRESA
 SISTEMA_NOME=$SISTEMA
+RAMO=$RAMO
 DATABASE_URL=postgresql://$BANCO:$SENHA_DB@db:5432/$BANCO
 EVOLUTION_URL=http://evolution:8080
 EVOLUTION_API_KEY=$EVOLUTION_API_KEY

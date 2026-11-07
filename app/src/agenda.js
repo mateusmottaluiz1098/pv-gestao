@@ -187,6 +187,7 @@ async function tratarResposta(numero, texto) {
   } else {
     await q("UPDATE agendamentos SET status='cancelado', obs = TRIM(COALESCE(obs,'') || ' [cancelado pelo cliente no WhatsApp]') WHERE id=$1", [ag.id]);
     await enviarMsg(ag, c.agenda_msg_cancelado, 'agenda_cancelado');
+    await require('./espera').avisarVaga(ag);
   }
   return true;
 }
@@ -237,11 +238,21 @@ async function horariosLivres(data, dur, profId, antecedenciaMin = 0) {
 }
 
 // ---------- Rotas ----------
+// id do profissional quando quem está logado é o próprio profissional (só vê o que é dele)
+const meuProf = (req) => (req.usuario && !req.usuario.admin && req.usuario.profissional_id) || null;
+async function garantirDono(req, id) {
+  const p = meuProf(req);
+  if (!p) return;
+  const { rows } = await q('SELECT profissional_id FROM agendamentos WHERE id=$1', [id]);
+  if (rows[0] && rows[0].profissional_id !== p) throw erro(403, 'Este horário é de outro profissional.');
+}
+
 function rotas(app, { rota, pode }) {
   // profissionais
   app.get('/api/agenda/profissionais', rota(async (req, res) => {
     const { rows } = await q('SELECT * FROM profissionais ORDER BY ativo DESC, ordem, nome');
-    res.json(rows);
+    const p = meuProf(req);
+    res.json(p ? rows.filter((r) => r.id === p) : rows);
   }));
   app.post('/api/agenda/profissionais', pode('agenda_config'), rota(async (req, res) => {
     const p = validarProf(req.body || {});
@@ -302,7 +313,8 @@ function rotas(app, { rota, pode }) {
          FROM agendamentos a JOIN profissionais p ON p.id = a.profissional_id LEFT JOIN servicos s ON s.id = a.servico_id
         WHERE a.inicio >= ($1::date)::timestamp AT TIME ZONE '${TZ}'
           AND a.inicio < (($2::date + 1)::timestamp) AT TIME ZONE '${TZ}'
-        ORDER BY a.inicio`, [de, ate]);
+          AND ($3::int IS NULL OR a.profissional_id = $3)
+        ORDER BY a.inicio`, [de, ate, meuProf(req)]);
     res.json(rows);
   }));
 
@@ -325,8 +337,9 @@ function rotas(app, { rota, pode }) {
     if (!okDataHora(b.inicio)) throw erro(400, 'Data/hora inválida');
     const dur = parseInt(b.duracao_min, 10);
     if (!(dur >= 5 && dur <= 720)) throw erro(400, 'Duração inválida');
-    const prof = parseInt(b.profissional_id, 10);
+    const prof = meuProf(req) || parseInt(b.profissional_id, 10);
     if (!prof) throw erro(400, 'Escolha o profissional');
+    if (id) await garantirDono(req, id);
     const status = STATUS.includes(b.status) ? b.status : 'agendado';
     let tel = null;
     const nome = String(b.cliente_nome || '').trim() || null;
@@ -388,6 +401,7 @@ function rotas(app, { rota, pode }) {
   }));
   app.put('/api/agenda/:id', pode('agenda'), rota(async (req, res) => res.json(await salvarAgendamento(req, req.params.id))));
   app.post('/api/agenda/:id/status', pode('agenda'), rota(async (req, res) => {
+    await garantirDono(req, req.params.id);
     const b = req.body || {};
     const sets = [];
     const p = [];
@@ -396,17 +410,28 @@ function rotas(app, { rota, pode }) {
     if (b.forma_pagamento) { p.push(b.forma_pagamento); sets.push(`forma_pagamento=$${p.length}`); }
     if (!sets.length) throw erro(400, 'Nada para alterar');
     p.push(req.params.id);
+    const antes = await buscar(req.params.id);
     await q(`UPDATE agendamentos SET ${sets.join(',')} WHERE id=$${p.length}`, p);
+    // pacote: desconta 1 do saldo (marca como pago com "pacote"); voltou a não pago: devolve o uso
+    const PAC = require('./pacotes');
+    if (b.usar_pacote) await PAC.usar(req.params.id, b.usar_pacote);
+    else if (('pago' in b && !b.pago) || (b.status && !['concluido'].includes(b.status) && antes && antes.forma_pagamento === 'pacote')) {
+      if (await PAC.estornarUso(req.params.id)) await q("UPDATE agendamentos SET pago = FALSE, forma_pagamento = NULL WHERE id = $1", [req.params.id]);
+    }
     await aplicarComissao(req.params.id);
+    // desmarcou: avisa quem está na lista de espera
+    let espera = [];
+    if (b.status === 'cancelado' && antes && ['agendado', 'confirmado'].includes(antes.status)) espera = await require('./espera').avisarVaga(antes);
     let fiado = null;
     if (b.pendurar) {
       const FIN = require('./financeiro');
       const r = await FIN.pendurarAgendamento(req.params.id, req.usuario.nome);
       fiado = { cliente: r.cliente.nome, anexado_em: r.anexado_em };
     }
-    res.json({ ...(await buscar(req.params.id)), fiado });
+    res.json({ ...(await buscar(req.params.id)), fiado, espera_avisados: espera });
   }));
   app.post('/api/agenda/:id/whatsapp', pode('agenda'), rota(async (req, res) => {
+    await garantirDono(req, req.params.id);
     const ag = await buscar(req.params.id);
     if (!ag) throw erro(404, 'Agendamento não encontrado');
     const c = await cfg.obter();
@@ -418,8 +443,12 @@ function rotas(app, { rota, pode }) {
     res.json({ ok: true });
   }));
   app.delete('/api/agenda/:id', pode('agenda'), rota(async (req, res) => {
+    await garantirDono(req, req.params.id);
+    const antes = await buscar(req.params.id);
+    await require('./pacotes').estornarUso(req.params.id);
     await q('DELETE FROM agendamentos WHERE id=$1', [req.params.id]);
-    res.json({ ok: true });
+    const espera = antes && ['agendado', 'confirmado'].includes(antes.status) ? await require('./espera').avisarVaga(antes) : [];
+    res.json({ ok: true, espera_avisados: espera });
   }));
 
   // relatório de comissões por período (datas do atendimento, 'YYYY-MM-DD')
@@ -432,7 +461,8 @@ function rotas(app, { rota, pode }) {
         WHERE a.status IN ('concluido','faltou','cancelado','agendado','confirmado')
           AND a.inicio >= ($1::date)::timestamp AT TIME ZONE '${TZ}'
           AND a.inicio < (($2::date + 1)::timestamp) AT TIME ZONE '${TZ}'
-        ORDER BY p.ordem, p.nome, a.inicio`, [de, ate]);
+          AND ($3::int IS NULL OR a.profissional_id = $3)
+        ORDER BY p.ordem, p.nome, a.inicio`, [de, ate, meuProf(req)]);
     const porProf = {};
     for (const a of rows) {
       const k = a.profissional_id;
@@ -449,7 +479,7 @@ function rotas(app, { rota, pode }) {
     // produtos vendidos (entram no faturamento e na comissão do profissional)
     const { rows: vds } = await q(
       `SELECT v.*, p.nome AS profissional_nome, p.cor FROM vendas v JOIN profissionais p ON p.id = v.profissional_id
-        WHERE v.data BETWEEN $1 AND $2 ORDER BY v.data, v.criado_em`, [de, ate]);
+        WHERE v.data BETWEEN $1 AND $2 AND ($3::int IS NULL OR v.profissional_id = $3) ORDER BY v.data, v.criado_em`, [de, ate, meuProf(req)]);
     for (const v of vds) {
       const k = v.profissional_id;
       const r = porProf[k] || (porProf[k] = { profissional_id: k, nome: v.profissional_nome, cor: v.cor, atendimentos: 0, faturamento: 0, comissao: 0, recebido: 0, faltas: 0, pendentes: 0, itens: [] });
@@ -468,7 +498,7 @@ function rotas(app, { rota, pode }) {
   app.get('/api/agenda/livres', rota(async (req, res) => {
     const data = /^\d{4}-\d{2}-\d{2}$/.test(req.query.data || '') ? req.query.data : U.hoje();
     const dur = parseInt(req.query.duracao, 10) || 30;
-    res.json(await horariosLivres(data, dur, req.query.profissional_id ? parseInt(req.query.profissional_id, 10) : null));
+    res.json(await horariosLivres(data, dur, meuProf(req) || (req.query.profissional_id ? parseInt(req.query.profissional_id, 10) : null)));
   }));
 }
 

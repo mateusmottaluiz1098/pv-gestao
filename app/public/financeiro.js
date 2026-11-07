@@ -20,9 +20,9 @@ async function pgCaixa(el) {
       <div><h1>Caixa do dia</h1><div class="muted">${esc(dataExt)}${ehHoje ? ' · hoje' : ''}</div></div>
       <div class="acoes">
         <button class="btn" id="cx-ant" aria-label="Dia anterior">${ic('esquerda')}</button><input type="date" id="cx-data" value="${CX.data}" style="width:auto;margin:0"><button class="btn" id="cx-prox" aria-label="Próximo dia">${ic('direita')}</button>
-        <button class="btn" id="cx-prod">${ic('produtos')} Produtos</button>
+        <button class="btn ${MOD('produtos') ? '' : 'hidden'}" id="cx-prod">${ic('produtos')} Produtos</button>
         <button class="btn" id="cx-mov">${ic('mais')} Despesa / retirada</button>
-        <button class="btn primario" id="cx-venda">${ic('mais')} Vender produto</button>
+        <button class="btn primario ${MOD('produtos') ? '' : 'hidden'}" id="cx-venda">${ic('mais')} Vender produto</button>
       </div>
     </div>
     <div class="grade g4">
@@ -37,7 +37,7 @@ async function pgCaixa(el) {
         <div class="cartao-topo"><h2>Por forma de pagamento</h2></div>
         ${formas.length ? formas.map(([f, v]) => `<div class="lista-item"><div class="cresce"><b>${esc(NOME_PAGTO[f] || f)}</b></div><div class="num"><b>${brl(v)}</b></div></div>`).join('') : '<div class="vazio" style="padding:18px">Nada recebido neste dia.</div>'}
       </div>
-      <div class="cartao">
+      <div class="cartao ${MOD('comissoes') ? '' : 'hidden'}">
         <div class="cartao-topo"><h2>Comissões por profissional</h2><a class="btn mini" href="#/comissoes">${ic('grafico')} Relatório</a></div>
         ${r.comissoes.length ? r.comissoes.map((c) => `<div class="lista-item"><span class="ag-ponto" style="background:${esc(c.cor)}"></span><div class="cresce"><b>${esc(c.nome)}</b><div class="muted pequeno">${c.atendimentos} atendimento(s)${c.produtos ? ` · produtos ${brl(c.produtos)}` : ''}</div></div><div class="num"><b>${brl(c.total)}</b></div></div>`).join('') : '<div class="vazio" style="padding:18px">Nenhum atendimento concluído neste dia.</div>'}
       </div>
@@ -154,7 +154,7 @@ async function modalProdutos(depoisVender) {
   const prods = await api('/produtos');
   abrirModal(`<div class="modal-topo"><h2>Produtos</h2><button class="fechar" data-fechar>×</button></div>
     <div class="modal-corpo">
-      ${depoisVender ? '<div class="aviso info pequeno">Cadastre os produtos que você vende (pomada, óleo, shampoo…) para registrar as vendas.</div>' : ''}
+      ${depoisVender ? `<div class="aviso info pequeno">Cadastre os produtos que você vende (ex.: ${esc(EX('produto', 'Pomada'))}) para registrar as vendas.</div>` : ''}
       <div class="tabela-wrap cartao" style="margin-bottom:14px"><table><thead><tr><th>Produto</th><th class="num">Preço</th><th class="num">Comissão</th><th class="num">Estoque</th><th></th></tr></thead><tbody>
       ${prods.map((p) => `<tr><td><b>${esc(p.nome)}</b> ${p.ativo ? '' : '<span class="tag">Inativo</span>'}</td><td class="num">${brl(p.preco)}</td><td class="num">${Number(p.comissao_pct)}%</td>
         <td class="num">${p.estoque == null ? '<span class="muted">—</span>' : p.estoque <= 0 ? `<span class="tag atrasado">${p.estoque}</span>` : p.estoque}</td>
@@ -162,7 +162,7 @@ async function modalProdutos(depoisVender) {
       </tbody></table></div>
       <form id="f-pr" class="cartao pad">
         <h3 id="pr-tit">Novo produto</h3>
-        <div class="linha"><label>Nome<input name="nome" required placeholder="ex.: Pomada modeladora"></label><label>Preço (R$)<input name="preco" inputmode="decimal" placeholder="0,00"></label></div>
+        <div class="linha"><label>Nome<input name="nome" required placeholder="ex.: ${esc(EX('produto', 'Pomada modeladora'))}"></label><label>Preço (R$)<input name="preco" inputmode="decimal" placeholder="0,00"></label></div>
         <div class="linha"><label>Comissão de quem vende (%)<input name="comissao_pct" inputmode="decimal" value="0"></label>
           <label>Estoque (opcional)<input name="estoque" type="number" placeholder="em branco = não controlar"></label></div>
         <label class="check"><input type="checkbox" name="ativo" checked> Ativo</label>
@@ -205,7 +205,7 @@ async function modalConsumo(cliente, aoSalvar) {
     <div class="modal-topo"><h2>Lançar consumo · ${esc(cliente.nome)}</h2><button type="button" class="fechar" data-fechar>×</button></div>
     <div class="modal-corpo">
       ${ativos.length ? `<div class="filtros" style="margin-bottom:10px">${ativos.map((s) => `<button type="button" class="btn mini" data-sv="${s.id}">${esc(s.nome)} · ${brl(s.preco)}</button>`).join('')}</div>` : ''}
-      <div class="linha3"><label>O que foi<input name="descricao" required placeholder="ex.: Corte"></label>
+      <div class="linha3"><label>O que foi<input name="descricao" required placeholder="ex.: ${esc(EX('consumo', 'Corte'))}"></label>
         <label>Valor (R$)<input name="valor" inputmode="decimal" required></label>
         <label>Data<input type="date" name="data" value="${hojeCx()}"></label></div>
       <label class="check"><input type="radio" name="modo" value="agora" checked> <span><b>Cobrar agora</b>: gera uma cobrança com vencimento hoje</span></label>

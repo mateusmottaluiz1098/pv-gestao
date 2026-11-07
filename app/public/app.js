@@ -55,7 +55,7 @@ function confirmar(titulo, texto, botao = 'Confirmar', perigo = false) {
 
 const DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 const NOME_FORMA_CLI = { mensal: 'Mensal', semanal: 'Semanal', quinzenal: 'Quinzenal', carne: 'Carnê', avulso: 'Só avulso' };
-const NOME_PAGTO = { pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Crédito', debito: 'Débito', transferencia: 'Transferência', boleto: 'Boleto', fiado: 'Fiado' };
+const NOME_PAGTO = { pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Crédito', debito: 'Débito', transferencia: 'Transferência', boleto: 'Boleto', fiado: 'Fiado', pacote: 'Pacote' };
 // "Forma" do cliente em texto curto (lista e ficha)
 function formaCliente(c) {
   if (c.forma === 'carne') return `Carnê (${c.parcelas_total}x) · dia ${c.dia_vencimento}`;
@@ -127,6 +127,7 @@ const PAGINAS = {
   agenda: ['Agenda', pgAgenda],
   comissoes: ['Comissões', pgComissoes, 'financeiro'],
   caixa: ['Caixa do dia', pgCaixa, 'financeiro'],
+  relatorios: ['Relatórios', pgRelatorios, 'financeiro'],
   clientes: ['Clientes', pgClientes],
   cobrancas: ['Cobranças', pgCobrancas],
   comprovantes: ['Comprovantes', pgComprovantes],
@@ -142,10 +143,12 @@ async function rotear() {
   if (!EU || !CONFIG) return;
   limparTimers();
   let pg = (location.hash.replace('#/', '') || 'painel').split('?')[0];
-  if (!PAGINAS[pg] || (PAGINAS[pg][2] && !pode(PAGINAS[pg][2]))) pg = 'painel';
+  if (!PAGINAS[pg] || (PAGINAS[pg][2] && !pode(PAGINAS[pg][2])) || (MOD_PAGINA[pg] && !MOD(MOD_PAGINA[pg]))) pg = 'painel';
+  if (SOU_PROF() && !['agenda', 'comissoes'].includes(pg)) pg = 'agenda'; // profissional: só a própria agenda
   const [titulo, fn] = PAGINAS[pg];
   $$('#menu a').forEach((a) => a.classList.toggle('ativo', a.dataset.pg === pg || (pg === 'comissoes' && a.dataset.pg === 'agenda')));
   $('#trilha-pg').textContent = titulo;
+  aplicarTermos($('.topo'));
   document.body.dataset.pg = pg;
   $('.sidebar').classList.remove('aberta');
   // cada navegação ganha uma área nova: se a página anterior ainda estiver carregando,
@@ -167,6 +170,7 @@ const ACOES_PERM = {
   '[data-pagar]': 'pagamentos', '[data-desfazer]': 'pagamentos', '[data-cancelar]': 'pagamentos', '[data-aceitar]': 'pagamentos', '[data-recusar]': 'pagamentos',
   '#rodar-fila': 'envios', '#parar-fila': 'envios', '#enviar-agora': 'envios',
   '#ag-novo': 'agenda', '#ag-com': 'financeiro', '#ag-prof': 'agenda_config', '#ag-serv': 'agenda_config', '.ag-acao': 'agenda',
+  '#ag-pac': 'agenda_config', '#cli-pacotes': 'agenda_config', '#vender-pacote': 'pagamentos', '[data-cancelar-pac]': 'pagamentos',
   '#wa-conectar': 'whatsapp', '#wa-sair': 'whatsapp', '#wa-teste': 'whatsapp',
   '#lancar-consumo': 'pagamentos', '#cobrar-fiado': 'pagamentos', '[data-del-consumo]': 'pagamentos',
   '#cx-venda': 'pagamentos', '[data-del-venda]': 'pagamentos', '#cx-mov': 'financeiro', '[data-del-mov]': 'financeiro', '#cx-prod': 'agenda_config',
@@ -199,11 +203,16 @@ function rotularTabelas(raiz) {
 }
 new MutationObserver(() => {
   aplicarIcones();
-  if (EU) { aplicarPermissoes($('#conteudo')); aplicarPermissoes($('#modal-caixa')); rotularTabelas($('#conteudo')); rotularTabelas($('#modal-caixa')); }
+  if (EU) {
+    aplicarPermissoes($('#conteudo')); aplicarPermissoes($('#modal-caixa'));
+    aplicarTermos($('#conteudo')); aplicarTermos($('#modal-caixa'));
+    rotularTabelas($('#conteudo')); rotularTabelas($('#modal-caixa'));
+  }
 })
   .observe(document.body, { childList: true, subtree: true });
 
 async function atualizarIndicadores() {
+  if (SOU_PROF()) return;
   try {
     const st = await api('/whatsapp/estado');
     $('#badge-wa').className = 'ponto ' + (st.conectado ? 'on' : 'off');
@@ -214,14 +223,49 @@ async function atualizarIndicadores() {
 }
 
 let intervaloIndicadores = null;
+// ---------- Ramo do negócio: módulos ligados e nomes da tela ----------
+const MOD = (m) => !CONFIG || !CONFIG.modulos || CONFIG.modulos[m] !== false;
+const EX = (k, padrao) => (CONFIG && CONFIG.exemplos && CONFIG.exemplos[k]) || padrao;
+// páginas que dependem de módulo
+const MOD_PAGINA = { agenda: 'agenda', caixa: 'caixa', comissoes: 'comissoes', relatorios: 'relatorios' };
+const SOU_PROF = () => !!(EU && !EU.admin && EU.profissional_id);
+function aplicarMenu() {
+  $$('#menu a').forEach((a) => {
+    if (SOU_PROF()) { a.classList.toggle('hidden', a.dataset.pg !== 'agenda'); return; }
+    const p = PAGINAS[a.dataset.pg];
+    const semPerm = !!(p && p[2] && !pode(p[2]));
+    const semModulo = MOD_PAGINA[a.dataset.pg] && !MOD(MOD_PAGINA[a.dataset.pg]);
+    a.classList.toggle('hidden', semPerm || !!semModulo);
+  });
+}
+// troca "profissional" por "técnico", "cliente" por "aluno" etc. conforme o ramo
+function aplicarTermos(raiz) {
+  const t = CONFIG && CONFIG.termos;
+  if (!t || !raiz) return;
+  const trocas = [];
+  if (t.profissional !== 'profissional') trocas.push([/\b([Pp])rofissionais\b/g, t.profissionais], [/\b([Pp])rofissional\b/g, t.profissional]);
+  if (t.cliente !== 'cliente') trocas.push([/\b([Cc])lientes\b/g, t.clientes], [/\b([Cc])liente\b/g, t.cliente]);
+  if (!trocas.length) return;
+  const trocar = (s) => {
+    let r = s;
+    for (const [re, novo] of trocas) r = r.replace(re, (m, ini) => (ini === ini.toUpperCase() ? novo[0].toUpperCase() + novo.slice(1) : novo));
+    return r;
+  };
+  const w = document.createTreeWalker(raiz, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement && n.parentElement.closest('textarea, script, style, .ev-n, .sem-termos') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  for (let n = w.nextNode(); n; n = w.nextNode()) { const v = trocar(n.nodeValue); if (v !== n.nodeValue) n.nodeValue = v; }
+  raiz.querySelectorAll('[placeholder], [title]').forEach((e) => {
+    for (const a of ['placeholder', 'title']) { const v = e.getAttribute(a); if (v) { const nv = trocar(v); if (nv !== v) e.setAttribute(a, nv); } }
+  });
+}
+
 async function iniciar() {
   try { EU = await api('/me'); } catch { return; }
   CONFIG = await api('/config');
   await carregarMarca();
-  $$('#menu a').forEach((a) => {
-    const p = PAGINAS[a.dataset.pg];
-    a.classList.toggle('hidden', !!(p && p[2] && !pode(p[2])));
-  });
+  aplicarMenu();
+  aplicarTermos($('.sidebar'));
   $('#eu-nome').textContent = EU.nome;
   $('#topo-data').textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' });
   $('#app').classList.remove('hidden');
@@ -263,7 +307,7 @@ async function pgPainel(el) {
       <div><div class="sobretitulo">${esc(CONFIG.empresa || 'Visão geral')}</div><h1>${saud} 👋</h1><div class="muted">Resumo de ${dataExt}.</div></div>
       <div class="acoes"><button class="btn primario" id="novo-cli">${ic('mais')} Novo cliente</button></div>
     </div>
-    ${d.agenda && d.agenda.usa_agenda ? `<div class="cartao" style="margin-bottom:14px"><div class="cartao-topo"><div><h2>Agenda de hoje</h2><div class="muted pequeno">${d.agenda.total} atendimento(s) · ${d.agenda.concluidos} concluído(s) · previsto ${brl(d.agenda.previsto)} · recebido ${brl(d.agenda.recebido)}</div></div><a class="btn" href="#/agenda">${ic('agenda')} Abrir agenda</a></div>
+    ${d.agenda && d.agenda.usa_agenda && MOD('agenda') ? `<div class="cartao" style="margin-bottom:14px"><div class="cartao-topo"><div><h2>Agenda de hoje</h2><div class="muted pequeno">${d.agenda.total} atendimento(s) · ${d.agenda.concluidos} concluído(s) · previsto ${brl(d.agenda.previsto)} · recebido ${brl(d.agenda.recebido)}</div></div><a class="btn" href="#/agenda">${ic('agenda')} Abrir agenda</a></div>
       ${d.agenda.proximos.length ? d.agenda.proximos.map((a) => `<div class="lista-item"><span class="ag-ponto" style="background:${esc(a.cor)}"></span><div class="cresce"><b>${a.inicio_local.slice(11)}</b> · ${esc(a.cliente_nome)} <span class="muted pequeno">${esc(a.servico_nome || '')} · ${esc(a.profissional_nome)}</span></div>${a.status === 'confirmado' ? '<span class="tag pago">Confirmado</span>' : '<span class="tag aberto">Agendado</span>'}</div>`).join('') : '<div class="vazio" style="padding:18px">Nenhum horário pendente para hoje.</div>'}</div>` : ''}
     ${d.comprovantes_pendentes ? `<div class="aviso">${ic('clip')} ${d.comprovantes_pendentes} comprovante(s) aguardando sua conferência. <a href="#/comprovantes">Conferir agora →</a></div>` : ''}
     <div class="grade g4">
@@ -352,7 +396,7 @@ async function pgClientes(el) {
   const lista = await api('/clientes');
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Clientes</h1><div class="muted">Cadastro e acompanhamento das mensalidades.</div></div>
-      <div class="acoes"><a class="btn" href="/api/exportar/clientes.csv">${ic('baixar')} Exportar CSV</a><button class="btn primario" id="novo-cli">${ic('mais')} Novo cliente</button></div></div>
+      <div class="acoes">${MOD('pacotes') ? `<button class="btn" id="cli-pacotes">${ic('produtos')} Pacotes e planos</button>` : ''}<a class="btn" href="/api/exportar/clientes.csv">${ic('baixar')} Exportar CSV</a><button class="btn primario" id="novo-cli">${ic('mais')} Novo cliente</button></div></div>
     <div class="cartao">
       <div class="cartao-topo"><div class="filtros">
         <input id="busca" placeholder="Buscar por nome, telefone ou identificação" style="min-width:260px" value="${esc(filtroClientes.busca)}">
@@ -403,6 +447,7 @@ async function pgClientes(el) {
   $('#busca').oninput = (e) => { filtroClientes.busca = e.target.value; desenhar(); };
   $('#f-status').onchange = (e) => { filtroClientes.status = e.target.value; desenhar(); };
   $('#novo-cli').onclick = () => modalCliente(null, () => rotear());
+  const bp = $('#cli-pacotes'); if (bp) bp.onclick = () => modalPacotes();
   desenhar();
 }
 
@@ -433,7 +478,7 @@ function modalCliente(c, aoSalvar) {
         </div>
         <label class="f-prim">Primeiro vencimento<input name="primeiro_vencimento" type="date" value="${c.primeiro_vencimento || ''}">
           <div class="ajuda" id="ajuda-prim"></div></label>
-        <div class="aviso info pequeno f-avulso">Cliente sem cobrança fixa: use <b>Lançar consumo</b> na ficha dele para cobrar um corte avulso ou pendurar no fiado.</div>
+        <div class="aviso info pequeno f-avulso">Cliente sem cobrança fixa: use <b>Lançar consumo</b> na ficha dele para cobrar algo avulso ou pendurar no fiado.</div>
         <div class="linha">
           <label>Identificação (opcional)<input name="identificacao" placeholder="ex.: apelido, empresa" value="${esc(c.identificacao || '')}"></label>
           <label>Endereço (opcional)<input name="endereco" value="${esc(c.endereco || '')}"></label>
@@ -482,7 +527,7 @@ function modalCliente(c, aoSalvar) {
 }
 
 async function modalFichaCliente(id) {
-  const [c, consumos] = await Promise.all([api(`/clientes/${id}`), api(`/clientes/${id}/consumos`)]);
+  const [c, consumos, pacotes] = await Promise.all([api(`/clientes/${id}`), api(`/clientes/${id}/consumos`), MOD('pacotes') ? api(`/clientes/${id}/pacotes`).catch(() => []) : []]);
   const pend = consumos.filter((x) => !x.cobranca_id);
   const totPend = pend.reduce((t, x) => t + Number(x.valor), 0);
   const sitConsumo = (x) => {
@@ -502,6 +547,14 @@ async function modalFichaCliente(id) {
         ${consumos.slice(0, 30).map((x) => `<tr><td>${brData(x.data)}</td><td>${esc(x.descricao)}${x.origem === 'agenda' ? ' <span class="sub2">agenda</span>' : x.origem === 'produto' ? ' <span class="sub2">produto</span>' : ''}</td><td class="num">${brl(x.valor)}</td><td>${sitConsumo(x)}</td>
           <td class="num">${x.cob_status === 'pago' ? '' : `<button class="btn mini" data-del-consumo="${x.id}" title="Excluir lançamento" aria-label="Excluir lançamento">${ic('lixo')}</button>`}</td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted pequeno" style="margin-bottom:16px">Nenhum consumo lançado.</p>'}
+      ${MOD('pacotes') ? `<div class="cartao-topo" style="padding:0;margin-bottom:8px;border:0"><h3 style="margin:0">Pacotes e planos</h3>
+        <div class="acoes"><button class="btn mini primario" id="vender-pacote">${ic('mais')} Vender pacote</button></div></div>
+      ${pacotes.length ? `<div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Pacote</th><th>Saldo</th><th>Validade</th><th>Situação</th><th></th></tr></thead><tbody>
+        ${pacotes.slice(0, 12).map((pc) => `<tr><td><b>${esc(pc.nome)}</b>${pc.recorrente ? ' <span class="tag aberto">assinatura</span>' : ''}${pc.servico_nome ? `<div class="sub2">${esc(pc.servico_nome)}</div>` : ''}</td>
+          <td>${pc.quantidade - pc.usados} de ${pc.quantidade}</td><td>${brData(pc.inicio)} a ${brData(pc.validade)}</td>
+          <td>${pc.status === 'ativo' ? (pc.pago ? '<span class="tag pago">Ativo</span>' : '<span class="tag pendente">Ativo · pagamento pendente</span>') : pc.status === 'cancelado' ? '<span class="tag">Cancelado</span>' : '<span class="tag">Encerrado</span>'}</td>
+          <td class="num">${pc.status === 'ativo' ? `<button class="btn mini" data-cancelar-pac="${pc.id}" title="Cancelar pacote" aria-label="Cancelar pacote">${ic('fechar')}</button>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="muted pequeno" style="margin-bottom:16px">Nenhum pacote vendido para este cliente.</p>'}` : ''}
       <h3>Cobranças</h3>
       <div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Referente a</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
       ${c.cobrancas.map((cb) => `<tr><td>${esc(refCobranca(cb, c.forma))}${cb.numero_parcela ? ` <span class="sub2">(${cb.numero_parcela}/${c.parcelas_total})</span>` : ''}${cb.tipo === 'avulsa' ? ' <span class="tag">avulsa</span>' : ''}</td>
@@ -517,6 +570,12 @@ async function modalFichaCliente(id) {
   ligarAcoesCobranca($('#modal-caixa'), () => modalFichaCliente(id));
   $('#editar-ficha').onclick = () => modalCliente(c, () => rotear());
   $('#lancar-consumo').onclick = () => modalConsumo(c, () => modalFichaCliente(id));
+  const vp = $('#vender-pacote'); if (vp) vp.onclick = () => modalVenderPacote(c, () => modalFichaCliente(id));
+  $$('[data-cancelar-pac]').forEach((b) => b.onclick = async () => {
+    if (!(await confirmar('Cancelar pacote?', 'O saldo que sobrou deixa de valer. Se ele tem cobrança em aberto, cancele também em Cobranças.', 'Cancelar pacote', true))) return modalFichaCliente(id);
+    try { await api(`/pacotes-clientes/${b.dataset.cancelarPac}/cancelar`, { method: 'POST' }); toast('Pacote cancelado'); } catch (e) { toast(e.message, true); }
+    modalFichaCliente(id);
+  });
   const cf = $('#cobrar-fiado');
   if (cf) cf.onclick = async () => {
     const enviar = await confirmar('Cobrar o fiado agora?', `Gera uma cobrança de <b>${brl(totPend)}</b> com vencimento hoje e manda no WhatsApp com o Pix.`, 'Cobrar e enviar');
@@ -750,11 +809,23 @@ async function conectarWa() {
   } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = 'Gerar QR code'; }
 }
 
+const NOMES_MODULO = {
+  agenda: ['Agenda', 'horários por profissional, confirmação e lembrete no WhatsApp'],
+  caixa: ['Caixa do dia', 'entradas, saídas e fechamento do dia'],
+  produtos: ['Venda de produtos', 'estoque e venda no balcão'],
+  comissoes: ['Comissões', 'quanto cada profissional ganha'],
+  pacotes: ['Pacotes e planos', 'cliente compra vários atendimentos ou assina por mês'],
+  espera: ['Lista de espera', 'avisa no WhatsApp quando abre um horário'],
+  online: ['Agendamento online', 'link para o cliente marcar sozinho'],
+  retorno: ['Retorno de clientes', '“faz tempo que não te vejo” no WhatsApp'],
+  relatorios: ['Relatórios', 'gráfico mês a mês e resultado por profissional'],
+};
 // ---------- Configurações ----------
 // organiza os quadros da configuração em abas (o formulário continua um só)
 const ABAS_CFG = [
+  ['negocio', 'Negócio', 'painel', /^Negócio$/i],
   ['cobranca', 'Cobrança e Pix', 'cobrancas', /Empresa|Régua|Envio automático|Após o pagamento|comprovante|avulsa/i],
-  ['agenda', 'Agenda', 'agenda', /^Agenda$/i],
+  ['agenda', 'Agenda', 'agenda', /^Agenda$|Lista de espera/i],
   ['online', 'Agendamento online', 'link', /Agendamento online/i],
   ['retorno', 'Retorno de clientes', 'whatsapp', /Retorno/i],
 ];
@@ -772,7 +843,8 @@ function abasConfig(el) {
   const grade = $('.grade', f); if (grade) grade.replaceWith(area); else f.prepend(area);
   const barra = document.createElement('div');
   barra.className = 'abas-cfg';
-  barra.innerHTML = ABAS_CFG.map(([id, nome, icone]) => `<button type="button" data-aba="${id}">${ic(icone)}<span>${nome}</span></button>`).join('');
+  const MOD_ABA = { agenda: 'agenda', online: 'online', retorno: 'retorno' };
+  barra.innerHTML = ABAS_CFG.filter(([id]) => !MOD_ABA[id] || MOD(MOD_ABA[id])).map(([id, nome, icone]) => `<button type="button" data-aba="${id}">${ic(icone)}<span>${nome}</span></button>`).join('');
   f.before(barra);
   const mostrar = (id) => {
     $$('button', barra).forEach((b) => b.classList.toggle('sel', b.dataset.aba === id));
@@ -784,7 +856,7 @@ function abasConfig(el) {
   $$('button', barra).forEach((b) => b.onclick = () => mostrar(b.dataset.aba));
   let ini = 'cobranca';
   try { ini = localStorage.getItem('cfg_aba') || ini; } catch (e) { /* sem storage */ }
-  mostrar(ABAS_CFG.some((a) => a[0] === ini) ? ini : 'cobranca');
+  mostrar($(`button[data-aba="${ini}"]`, barra) ? ini : 'cobranca');
 }
 
 async function pgConfig(el) {
@@ -796,6 +868,15 @@ async function pgConfig(el) {
     <div class="cabecalho"><div><h1>Configurações</h1><div class="muted">Cobrança, Pix, agenda e mensagens automáticas.</div></div>
       <div class="acoes"><a class="btn" href="/api/exportar/backup.json">${ic('baixar')} Backup</a><button class="btn primario" id="salvar-cfg">Salvar configurações</button></div></div>
     <form id="f-cfg">
+    <div class="cartao pad" id="cfg-negocio">
+      <h3>Negócio</h3>
+      <label>Ramo do negócio<select name="ramo">${Object.entries(c.ramos || {}).map(([k, r]) => `<option value="${k}" ${k === c.ramo ? 'selected' : ''}>${esc(r.nome)}</option>`).join('')}</select></label>
+      <p class="muted pequeno" id="cfg-ramo-ex" style="margin-top:-6px"></p>
+      <div class="pequeno" style="font-weight:600;color:#3c5163;margin:6px 0 8px">Módulos ligados</div>
+      <div class="mod-grade">${Object.entries(NOMES_MODULO).map(([k, [n, d]]) => `<label class="check mod-item"><input type="checkbox" name="mod_${k}" ${c.modulos && c.modulos[k] !== false ? 'checked' : ''}> <span><b>${n}</b><small>${d}</small></span></label>`).join('')}</div>
+      <p class="muted pequeno">Ao trocar o ramo, os módulos mudam para o padrão dele. Você pode ligar ou desligar cada um. O que fica desligado some do menu.</p>
+      <button type="button" class="btn mini" id="cfg-msgs-ramo">Usar as mensagens prontas deste ramo</button>
+    </div>
     <div class="grade g2">
       <div>
         <div class="cartao pad" style="margin-bottom:14px">
@@ -859,6 +940,13 @@ async function pgConfig(el) {
           <label>Quando o cliente responde CANCELAR<textarea name="agenda_msg_cancelado" style="min-height:60px">${esc(c.agenda_msg_cancelado)}</textarea></label>
         </div>
         <div class="cartao pad" style="margin-top:14px">
+          <h3>Lista de espera</h3>
+          <label class="check"><input type="checkbox" name="espera_auto" ${c.espera_auto ? 'checked' : ''}> Avisar no WhatsApp quando alguém desmarcar</label>
+          <label>Quantas pessoas avisar por horário<input name="espera_qtd_aviso" type="number" min="1" max="20" value="${esc(c.espera_qtd_aviso)}"></label>
+          <label>Mensagem<textarea name="espera_msg">${esc(c.espera_msg)}</textarea></label>
+          <p class="muted pequeno">Campos: {primeiro_nome} {data} {dia_semana} {hora} {profissional} {servico} {empresa}. Avisa as primeiras da fila para aquele dia e horário.</p>
+        </div>
+        <div class="cartao pad" style="margin-top:14px">
           <h3>Agendamento online (link para o cliente)</h3>
           <label class="check"><input type="checkbox" name="online_ativo" ${c.online_ativo ? 'checked' : ''}> <span><b>Deixar os clientes marcarem horário sozinhos pelo link</b></span></label>
           <div class="aviso info pequeno">Link para mandar aos clientes e colocar no Instagram: <b><a href="${location.origin}/agendar" target="_blank">${location.origin}/agendar</a></b> <button type="button" class="btn mini" id="copiar-link">Copiar</button></div>
@@ -888,6 +976,20 @@ async function pgConfig(el) {
   const f = $('#f-cfg');
   f.pix_tipo.value = c.pix_tipo;
   abasConfig(el);
+  const cardEspera = $$('.cartao.pad', el).find((x) => ($('h3', x) || {}).textContent === 'Lista de espera');
+  if (cardEspera && !MOD('espera')) cardEspera.remove();
+  const exRamo = () => { const r = (c.ramos || {})[f.ramo.value]; $('#cfg-ramo-ex').textContent = r ? `Para ${r.exemplo}.` : ''; };
+  exRamo();
+  f.ramo.onchange = () => {
+    exRamo();
+    const r = (c.ramos || {})[f.ramo.value];
+    if (r) for (const [k, on] of Object.entries(r.modulos)) { const i = f['mod_' + k]; if (i) i.checked = on; }
+  };
+  $('#cfg-msgs-ramo').onclick = async () => {
+    if (!(await confirmar('Usar as mensagens prontas do ramo?', 'Os textos de confirmação de horário, lembrete e retorno voltam para o modelo do ramo escolhido. Salve antes se trocou o ramo.', 'Usar mensagens prontas'))) return rotear();
+    try { await api('/config/mensagens-ramo', { method: 'POST' }); toast('Mensagens do ramo aplicadas ✓'); } catch (e) { toast(e.message, true); }
+    rotear();
+  };
   let regua = JSON.parse(JSON.stringify(c.regua || []));
   let ultimoTexto = null;
   const desenharRegua = () => {
@@ -935,6 +1037,7 @@ async function pgConfig(el) {
     desenharRegua();
   };
   const salvarCfg = async (silencioso) => {
+    const antesMod = [CONFIG.ramo, CONFIG.modulos];
     const body = {};
     for (const inp of $$('input[name], select[name], textarea[name]', f)) body[inp.name] = inp.type === 'checkbox' ? inp.checked : inp.value;
     body.regua = regua;
@@ -942,6 +1045,7 @@ async function pgConfig(el) {
       CONFIG = await api('/config', { method: 'PUT', body });
       aplicarMarca({ empresa: CONFIG.empresa });
       if (!silencioso) toast('Configurações salvas ✓');
+      if (JSON.stringify(antesMod) !== JSON.stringify([CONFIG.ramo, CONFIG.modulos])) { aplicarMenu(); aplicarTermos($('.sidebar')); rotear(); }
     } catch (e) { toast(e.message, true); throw e; }
   };
   $('#salvar-cfg').onclick = () => salvarCfg(false);
@@ -1045,7 +1149,7 @@ async function pgUsuarios(el) {
       <tbody>${lista.map((u) => `<tr>
         <td><b>${esc(u.nome)}</b>${u.id === EU.id ? ' <span class="tag">você</span>' : ''}</td>
         <td>${esc(u.login)}</td>
-        <td class="pequeno">${u.admin ? '<span class="tag aberto">Administrador (tudo)</span>' : (u.permissoes.length ? u.permissoes.map((p) => NOME_PERM[p] || p).join(', ') : '<span class="muted">Só visualizar</span>')}</td>
+        <td class="pequeno">${u.admin ? '<span class="tag aberto">Administrador (tudo)</span>' : u.profissional_id ? '<span class="tag">Profissional: só a própria agenda</span>' : (u.permissoes.length ? u.permissoes.map((p) => NOME_PERM[p] || p).join(', ') : '<span class="muted">Só visualizar</span>')}</td>
         <td class="pequeno muted">${u.ultimo_acesso ? brDataHora(u.ultimo_acesso) : 'nunca'}</td>
         <td>${u.ativo ? '<span class="tag pago">Ativo</span>' : '<span class="tag">Desativado</span>'}</td>
         <td class="num"><button class="btn mini" data-usu="${u.id}">Editar</button></td></tr>`).join('')}
@@ -1055,8 +1159,9 @@ async function pgUsuarios(el) {
   $$('[data-usu]').forEach((b) => b.onclick = () => modalUsuario(lista.find((u) => u.id == b.dataset.usu), perms));
 }
 
-function modalUsuario(u, perms) {
+async function modalUsuario(u, perms) {
   const novo = !u;
+  const profs = MOD('agenda') ? (await api('/agenda/profissionais').catch(() => [])).filter((p) => p.ativo) : [];
   u = u || { ativo: true, admin: false, permissoes: ['pagamentos'] };
   abrirModal(`<form id="f-usu">
     <div class="modal-topo"><h2>${novo ? 'Novo usuário' : 'Editar usuário'}</h2><button type="button" class="fechar" data-fechar>×</button></div>
@@ -1065,6 +1170,8 @@ function modalUsuario(u, perms) {
         <label>Login (para entrar)<input name="login" required autocapitalize="none" value="${esc(u.login || '')}" placeholder="ex.: maria"></label></div>
       <label>${novo ? 'Senha' : 'Nova senha (deixe em branco para manter)'}<input type="password" name="senha" ${novo ? 'required' : ''} minlength="6" autocomplete="new-password"></label>
       <label class="check"><input type="checkbox" name="admin" ${u.admin ? 'checked' : ''}> <b>Administrador</b> (pode tudo, inclusive gerenciar usuários)</label>
+      ${profs.length ? `<label id="usu-prof">É um profissional? Ele vê só a própria agenda e as próprias comissões
+        <select name="profissional_id"><option value="">Não, usar as permissões abaixo</option>${profs.map((p) => `<option value="${p.id}" ${u.profissional_id === p.id ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select></label>` : ''}
       <div class="perm-lista" id="perm-lista" style="padding:10px 12px;border:1px solid var(--borda);border-radius:10px;margin-bottom:12px">
         ${Object.entries(perms).map(([k, t]) => `<label class="check"><input type="checkbox" name="perm" value="${k}" ${(u.permissoes || []).includes(k) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}
       </div>
@@ -1075,11 +1182,17 @@ function modalUsuario(u, perms) {
       ${novo || u.id === EU.id ? '' : '<button type="button" class="btn perigo" id="usu-excluir" style="margin-right:auto">Excluir</button>'}
       <button type="button" class="btn" data-fechar>Cancelar</button><button class="btn primario">Salvar</button></div></form>`);
   const f = $('#f-usu');
-  const tg = () => { $('#perm-lista').style.opacity = f.admin.checked ? .45 : 1; $$('#perm-lista input').forEach((i) => i.disabled = f.admin.checked); };
-  f.admin.onchange = tg; tg();
+  const tg = () => {
+    const prof = f.profissional_id && f.profissional_id.value && !f.admin.checked;
+    const trava = f.admin.checked || prof;
+    $('#perm-lista').style.opacity = trava ? .45 : 1; $$('#perm-lista input').forEach((i) => i.disabled = trava);
+    if ($('#usu-prof')) $('#usu-prof').classList.toggle('hidden', f.admin.checked);
+  };
+  f.admin.onchange = tg; if (f.profissional_id) f.profissional_id.onchange = tg; tg();
   f.onsubmit = async (e) => {
     e.preventDefault();
     const body = { nome: f.nome.value, login: f.login.value, senha: f.senha.value, admin: f.admin.checked, ativo: f.ativo.checked,
+      profissional_id: f.profissional_id ? f.profissional_id.value || null : null,
       permissoes: $$('input[name=perm]:checked', f).map((i) => i.value) };
     try {
       await api(novo ? '/usuarios' : `/usuarios/${u.id}`, { method: novo ? 'POST' : 'PUT', body });
@@ -1096,3 +1209,74 @@ function modalUsuario(u, perms) {
 }
 
 carregarMarca().then(() => iniciar()).catch(() => mostrarLogin());
+
+// ---------- Pacotes e planos ----------
+async function modalVenderPacote(c, aoSalvar) {
+  const pacotes = (await api('/pacotes')).filter((p) => p.ativo);
+  if (!pacotes.length) {
+    if (pode('agenda_config')) { toast('Cadastre um pacote primeiro'); return modalPacotes(); }
+    return toast('Nenhum pacote cadastrado. Peça ao administrador.', true);
+  }
+  abrirModal(`<form id="f-vp">
+    <div class="modal-topo"><h2>Vender pacote · ${esc(c.nome)}</h2><button type="button" class="fechar" data-fechar>×</button></div>
+    <div class="modal-corpo">
+      <label>Pacote<select name="pacote_id">${pacotes.map((p) => `<option value="${p.id}">${esc(p.nome)} · ${p.quantidade} uso(s) · ${brl(p.valor)}${p.recorrente ? ' · assinatura' : ''}</option>`).join('')}</select></label>
+      <div class="aviso info pequeno" id="vp-info"></div>
+      <label>Pagamento<select name="forma_pagamento">
+        <option value="pix">Pagou agora no Pix</option><option value="dinheiro">Pagou agora em dinheiro</option><option value="debito">Pagou agora no débito</option><option value="cartao">Pagou agora no crédito</option>
+        <option value="cobrar">Gerar cobrança (com Pix)</option></select></label>
+      <label class="check hidden" id="vp-enviar"><input type="checkbox" name="enviar" checked> Mandar a cobrança agora no WhatsApp</label>
+      <p class="erro-txt" id="vp-erro"></p>
+    </div>
+    <div class="modal-rodape"><button type="button" class="btn" data-fechar>Cancelar</button><button class="btn primario">Registrar venda</button></div></form>`);
+  const f = $('#f-vp');
+  const info = () => {
+    const p = pacotes.find((x) => String(x.id) === f.pacote_id.value);
+    $('#vp-info').innerHTML = p ? `${p.quantidade} uso(s)${p.servico_nome ? ` de <b>${esc(p.servico_nome)}</b>` : ''}, vale ${p.validade_dias} dias. ${p.recorrente ? 'É uma <b>assinatura</b>: no fim do período renova sozinha e gera a cobrança do próximo.' : 'Cada uso sai do saldo ao concluir o atendimento.'}` : '';
+    $('#vp-enviar').classList.toggle('hidden', f.forma_pagamento.value !== 'cobrar');
+  };
+  f.pacote_id.onchange = info; f.forma_pagamento.onchange = info; info();
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api(`/clientes/${c.id}/pacotes`, { method: 'POST', body: { pacote_id: f.pacote_id.value, forma_pagamento: f.forma_pagamento.value, enviar: f.enviar.checked } });
+      fecharModal(); toast(r.aviso || 'Pacote vendido ✓', !!r.aviso); aoSalvar && aoSalvar();
+    } catch (err) { $('#vp-erro').textContent = err.message; }
+  };
+}
+
+async function modalPacotes(editando) {
+  const [lista, servs] = await Promise.all([api('/pacotes'), MOD('agenda') ? api('/agenda/servicos').catch(() => []) : []]);
+  const p = editando ? lista.find((x) => x.id === editando) || {} : { ativo: true, validade_dias: 30, quantidade: 4 };
+  abrirModal(`
+    <div class="modal-topo"><h2>Pacotes e planos</h2><button class="fechar" data-fechar>×</button></div>
+    <div class="modal-corpo">
+      <div class="tabela-wrap cartao" style="margin-bottom:14px"><table><thead><tr><th>Pacote</th><th>Usos</th><th class="num">Valor</th><th>Validade</th><th></th></tr></thead><tbody>
+        ${lista.map((x) => `<tr><td><b>${esc(x.nome)}</b>${x.recorrente ? ' <span class="tag aberto">assinatura</span>' : ''}${x.ativo ? '' : ' <span class="tag">inativo</span>'}${x.servico_nome ? `<div class="sub2">${esc(x.servico_nome)}</div>` : ''}</td>
+          <td>${x.quantidade}</td><td class="num">${brl(x.valor)}</td><td>${x.validade_dias} dias</td><td class="num"><button class="btn mini" data-pk="${x.id}">Editar</button></td></tr>`).join('') || '<tr><td colspan="5" class="vazio">Nenhum pacote ainda.</td></tr>'}
+      </tbody></table></div>
+      <form id="f-pk" class="cartao pad">
+        <h3>${editando ? 'Editar pacote' : 'Novo pacote'}</h3>
+        <label>Nome<input name="nome" required value="${esc(p.nome || '')}" placeholder="ex.: ${esc(EX('pacote', '4 atendimentos no mês'))}"></label>
+        <div class="linha3"><label>Quantidade de usos<input name="quantidade" type="number" min="1" required value="${p.quantidade || ''}"></label>
+          <label>Valor (R$)<input name="valor" required value="${p.valor != null ? String(p.valor).replace('.', ',') : ''}" inputmode="decimal"></label>
+          <label>Vale por (dias)<input name="validade_dias" type="number" min="1" required value="${p.validade_dias || 30}"></label></div>
+        ${servs.length ? `<label>Serviço (opcional)<select name="servico_id"><option value="">Qualquer serviço</option>${servs.filter((s) => s.ativo).map((s) => `<option value="${s.id}" ${s.id === p.servico_id ? 'selected' : ''}>${esc(s.nome)}</option>`).join('')}</select></label>` : ''}
+        <label class="check"><input type="checkbox" name="recorrente" ${p.recorrente ? 'checked' : ''}> <span><b>Assinatura</b>: renova sozinha no fim do período e gera a cobrança do próximo</span></label>
+        <label class="check"><input type="checkbox" name="ativo" ${p.ativo !== false ? 'checked' : ''}> Ativo (aparece para vender)</label>
+        <p class="erro-txt" id="pk-erro"></p>
+        <div class="acoes">${editando ? '<button type="button" class="btn" id="pk-novo">Cancelar edição</button>' : ''}<button class="btn primario">Salvar pacote</button></div>
+      </form>
+    </div>
+    <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button></div>`, true);
+  $$('[data-pk]').forEach((b) => b.onclick = () => modalPacotes(Number(b.dataset.pk)));
+  const nv = $('#pk-novo'); if (nv) nv.onclick = () => modalPacotes();
+  const f = $('#f-pk');
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { nome: f.nome.value, quantidade: f.quantidade.value, valor: f.valor.value, validade_dias: f.validade_dias.value,
+      servico_id: f.servico_id ? f.servico_id.value || null : null, recorrente: f.recorrente.checked, ativo: f.ativo.checked };
+    try { await api(editando ? `/pacotes/${editando}` : '/pacotes', { method: editando ? 'PUT' : 'POST', body }); toast('Pacote salvo ✓'); modalPacotes(); }
+    catch (err) { $('#pk-erro').textContent = err.message; }
+  };
+}

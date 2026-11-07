@@ -33,9 +33,11 @@ async function pgAgenda(el) {
     <div class="cabecalho">
       <div><h1>Agenda</h1><div class="muted" id="ag-titulo"></div></div>
       <div class="acoes">
-        <a class="btn" id="ag-com" href="#/comissoes">Comissões</a>
+        <a class="btn ${MOD('comissoes') ? '' : 'hidden'}" id="ag-com" href="#/comissoes">Comissões</a>
         <button class="btn" id="ag-prof">Profissionais</button>
         <button class="btn" id="ag-serv">Serviços</button>
+        <button class="btn ${MOD('pacotes') ? '' : 'hidden'}" id="ag-pac">Pacotes</button>
+        <button class="btn ${MOD('espera') ? '' : 'hidden'}" id="ag-espera" title="Quem quer um horário que está cheio">${ic('relogio')} Lista de espera <b class="contador hidden" id="ag-espera-n"></b></button>
         <button class="btn" id="ag-cheia" title="Esconder o menu e usar a tela toda">${ic('expandir')} <span>Tela cheia</span></button>
         <button class="btn primario" id="ag-novo">${ic('mais')} Agendar</button>
       </div>
@@ -61,7 +63,7 @@ async function pgAgenda(el) {
         </div>
         <div class="filtros">
           <div class="seg" id="ag-vista"><button data-v="dia">Dia</button><button data-v="3dias">3 dias</button><button data-v="semana">Semana</button></div>
-          <select id="ag-psem" class="${AG.vista === 'dia' ? 'hidden' : ''}"><option value="0">Todos os profissionais</option>${ativos.map((p) => `<option value="${p.id}" ${p.id === AG.profSemana ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>
+          <select id="ag-psem" class="${AG.vista === 'dia' || ativos.length < 2 ? 'hidden' : ''}"><option value="0">Todos os profissionais</option>${ativos.map((p) => `<option value="${p.id}" ${p.id === AG.profSemana ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>
         </div>
       </div>
       <div id="ag-resumo" class="ag-resumo"></div>
@@ -77,6 +79,8 @@ async function pgAgenda(el) {
     marcarCheia(); ajustarAlturaAgenda();
   };
   $('#ag-prof').onclick = () => modalProfissionais();
+  $('#ag-espera').onclick = () => modalEspera(AG.data);
+  $('#ag-pac').onclick = () => modalPacotes();
   $('#ag-serv').onclick = () => modalServicos();
   const p2 = $('#ag-prof2'); if (p2) p2.onclick = () => modalProfissionais();
   $('#ag-novo').onclick = () => modalAgendamento(null, { data: AG.data, hora: null, profissional_id: AG.vista !== 'dia' && AG.profSemana ? AG.profSemana : (ativos[0] && ativos[0].id) });
@@ -176,6 +180,12 @@ async function desenharAgenda(rolar) {
     $('#ag-titulo').textContent = dataLonga(AG.data) + (AG.data === hojeLocal() ? ' · hoje' : '');
   }
   AG.itens = await api(`/agenda?de=${de}&ate=${ate}`);
+  if (MOD('espera')) {
+    api(`/espera/contagem?de=${de}&ate=${ate}`).then((cont) => {
+      const n = Object.values(cont).reduce((s, x) => s + x, 0);
+      const b = $('#ag-espera-n'); if (b) { b.textContent = n; b.classList.toggle('hidden', !n); }
+    }).catch(() => {});
+  }
   // semana: esconde dias em que ninguém trabalha (a não ser que tenha algo marcado)
   if (AG.vista === 'semana') {
     const comItem = new Set(AG.itens.filter((a) => a.status !== 'cancelado').map((a) => a.inicio_local.slice(0, 10)));
@@ -336,7 +346,8 @@ function modalAgendamento(a, padrao = {}) {
   const v = a ? {
     profissional_id: a.profissional_id, servico_id: a.servico_id, data: a.inicio_local.slice(0, 10), hora: a.inicio_local.slice(11),
     duracao: dur, cliente_nome: a.cliente_nome, telefone: a.telefone, valor: a.valor, obs: a.obs, status: a.status, pago: a.pago, forma_pagamento: a.forma_pagamento, cliente_id: a.cliente_id,
-  } : { profissional_id: padrao.profissional_id, data: padrao.data, hora: padrao.hora || '09:00', duracao: intervalo, status: 'agendado' };
+  } : { profissional_id: padrao.profissional_id, data: padrao.data, hora: padrao.hora || '09:00', duracao: padrao.duracao || intervalo, status: 'agendado',
+    cliente_nome: padrao.cliente_nome, telefone: padrao.telefone, servico_id: padrao.servico_id, cliente_id: padrao.cliente_id };
   const bloq = v.status === 'bloqueio';
   const servAtivos = AG.servs.filter((s) => s.ativo || s.id === v.servico_id);
   const podeEditar = pode('agenda');
@@ -396,6 +407,7 @@ function modalAgendamento(a, padrao = {}) {
     const o = f.servico_id.selectedOptions[0];
     if (o && o.dataset.dur) { f.duracao.value = o.dataset.dur; f.valor.value = String(o.dataset.preco).replace('.', ','); mostrarLivres(); }
   };
+  if (novo && v.servico_id) f.servico_id.onchange(); // veio da lista de espera: já preenche duração e valor
   // sugestões de clientes
   let tSug;
   f.cliente_nome.oninput = () => {
@@ -437,6 +449,7 @@ function modalAgendamento(a, padrao = {}) {
       const r = await api(novo ? '/agenda' : `/agenda/${a.id}`, { method: novo ? 'POST' : 'PUT', body });
       fecharModal();
       toast(r.aviso || (novo ? (body.enviar_confirmacao && body.telefone ? 'Agendado e confirmação enviada ✓' : 'Agendado ✓') : 'Salvo ✓'), !!r.aviso);
+      if (novo && padrao.aoSalvar) padrao.aoSalvar(r);
       AG.data = f.data.value; desenharAgenda();
     } catch (err) {
       if (/Conflito|bloqueado/.test(err.message) && !forcar) {
@@ -461,7 +474,11 @@ function modalAgendamento(a, padrao = {}) {
   $$('[data-st]', f).forEach((b) => b.onclick = async () => {
     const st = b.dataset.st;
     if (st === 'concluido' && !f.pago.checked) return modalConcluir(a, f.forma_pagamento.value);
-    try { await api(`/agenda/${a.id}/status`, { method: 'POST', body: { status: st } }); fecharModal(); toast(NOME_STATUS[st] + ' ✓'); desenharAgenda(); }
+    try {
+      const r = await api(`/agenda/${a.id}/status`, { method: 'POST', body: { status: st } }); fecharModal();
+      const av = (r.espera_avisados || []).length;
+      toast(av ? `${NOME_STATUS[st]}. ${av} pessoa(s) da lista de espera foram avisadas no WhatsApp` : NOME_STATUS[st] + ' ✓'); desenharAgenda();
+    }
     catch (err) { toast(err.message, true); }
   });
   const wa = $('#ag-wa');
@@ -473,18 +490,26 @@ function modalAgendamento(a, padrao = {}) {
   const ex = $('#ag-excluir');
   if (ex) ex.onclick = async () => {
     if (!(await confirmar('Excluir agendamento?', 'Ele some da agenda e do histórico. Para manter o registro, use “Cancelar horário”.', 'Excluir', true))) return;
-    await api(`/agenda/${a.id}`, { method: 'DELETE' }); toast('Excluído'); desenharAgenda();
+    const r = await api(`/agenda/${a.id}`, { method: 'DELETE' });
+    const av = (r.espera_avisados || []).length;
+    toast(av ? `Excluído. ${av} pessoa(s) da lista de espera foram avisadas` : 'Excluído'); desenharAgenda();
   };
 }
 
 // ---------- Concluir atendimento: pago agora, pendurar (fiado) ou deixar em aberto ----------
-function modalConcluir(a, formaSugerida) {
+async function modalConcluir(a, formaSugerida) {
   const podeFiado = !!(a.cliente_id || a.telefone);
+  // pacotes do cliente com saldo: o atendimento pode sair do pacote
+  const pacs = MOD('pacotes') && podeFiado
+    ? (await api(`/pacotes/cliente?cliente_id=${a.cliente_id || ''}&telefone=${encodeURIComponent(a.telefone || '')}`).catch(() => []))
+      .sort((x, y) => (y.servico_id === a.servico_id) - (x.servico_id === a.servico_id))
+    : [];
   abrirModal(`<form id="f-cc">
     <div class="modal-topo"><h2>Atendimento concluído</h2><button type="button" class="fechar" data-fechar>×</button></div>
     <div class="modal-corpo">
       <p><b>${esc(a.cliente_nome || '')}</b> · ${esc(a.servico_nome || 'atendimento')} · <b>${brl(a.valor)}</b></p>
-      <label class="check"><input type="radio" name="op" value="pago" checked> <b>Pagou agora</b></label>
+      ${pacs.map((pc, i) => `<label class="check"><input type="radio" name="op" value="pac:${pc.id}" ${i === 0 ? 'checked' : ''}> <span><b>Usar o pacote ${esc(pc.nome)}</b>: restam ${pc.saldo} de ${pc.quantidade}, vale até ${brData(pc.validade)}${pc.pago ? '' : ' · <span class="tag atrasado">pagamento pendente</span>'}</span></label>`).join('')}
+      <label class="check"><input type="radio" name="op" value="pago" ${pacs.length ? '' : 'checked'}> <b>Pagou agora</b></label>
       <div style="margin:-2px 0 10px 24px" id="cc-forma"><select name="forma">${[['dinheiro', 'Dinheiro'], ['pix', 'Pix'], ['debito', 'Cartão de débito'], ['cartao', 'Cartão de crédito']].map(([k, n]) => `<option value="${k}" ${k === formaSugerida ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <label class="check ${podeFiado ? '' : 'muted'}"><input type="radio" name="op" value="fiado" ${podeFiado ? '' : 'disabled'}> <span><b>Pendurar na conta (fiado)</b>${podeFiado ? ': entra na próxima cobrança do cliente' : ': cadastre o WhatsApp do cliente para poder pendurar'}</span></label>
       <label class="check"><input type="radio" name="op" value="aberto"> Ainda não pagou (resolvo depois)</label>
@@ -493,16 +518,19 @@ function modalConcluir(a, formaSugerida) {
     <div class="modal-rodape"><button type="button" class="btn" data-fechar>Cancelar</button><button class="btn verde">Concluir</button></div></form>`);
   const f = $('#f-cc');
   $$('input[name=op]', f).forEach((r) => r.onchange = () => $('#cc-forma').classList.toggle('hidden', f.op.value !== 'pago'));
+  $('#cc-forma').classList.toggle('hidden', f.op.value !== 'pago');
   f.onsubmit = async (e) => {
     e.preventDefault();
     const op = f.op.value;
     const body = { status: 'concluido' };
     if (op === 'pago') { body.pago = true; body.forma_pagamento = f.forma.value; }
     if (op === 'fiado') body.pendurar = true;
+    if (op.startsWith('pac:')) body.usar_pacote = Number(op.slice(4));
     try {
       const r = await api(`/agenda/${a.id}/status`, { method: 'POST', body });
       fecharModal();
       if (r.fiado) toast(r.fiado.anexado_em ? `Pendurado na conta de ${r.fiado.cliente}: entra na cobrança de ${brData(r.fiado.anexado_em)} ✓` : `Pendurado no fiado de ${r.fiado.cliente} ✓`);
+      else if (body.usar_pacote) { const pc = pacs.find((x) => x.id === body.usar_pacote); toast(`Descontado do pacote: ${pc ? pc.saldo - 1 : ''} restante(s) ✓`); }
       else toast('Concluído ✓');
       desenharAgenda();
     } catch (err) { $('#cc-erro').textContent = err.message; }
@@ -571,7 +599,7 @@ async function modalServicos() {
       </tbody></table></div>
       <form id="f-se" class="cartao pad">
         <h3 id="se-tit">Novo serviço</h3>
-        <div class="linha3"><label>Nome<input name="nome" required placeholder="ex.: Corte"></label>
+        <div class="linha3"><label>Nome<input name="nome" required placeholder="ex.: ${esc(EX('servico', 'Corte'))}"></label>
           <label>Duração (min)<input name="duracao_min" type="number" min="5" step="5" value="30" required></label>
           <label>Preço (R$)<input name="preco" inputmode="decimal" placeholder="0,00"></label></div>
         <label>Comissão própria deste serviço (%)<input name="comissao_pct" inputmode="decimal" placeholder="em branco = usa a do profissional"></label>
@@ -670,4 +698,72 @@ async function pgComissoes(el) {
     a.download = `comissoes-${de}-a-${ate}.csv`;
     a.click();
   };
+}
+
+// ---------- Lista de espera ----------
+const NOME_ESPERA = { aguardando: 'Aguardando', avisado: 'Avisado', marcado: 'Marcado', cancelado: 'Desistiu' };
+async function modalEspera(data) {
+  const lista = await api(`/espera?data=${data}`);
+  const ativos = AG.profs.filter((p) => p.ativo);
+  const servs = AG.servs.filter((s) => s.ativo);
+  const faixa = (e) => e.hora_de || e.hora_ate ? `${e.hora_de || 'qualquer hora'}${e.hora_ate ? ' até ' + e.hora_ate : ' em diante'}` : 'qualquer horário';
+  abrirModal(`
+    <div class="modal-topo"><h2>Lista de espera</h2><button type="button" class="fechar" data-fechar>×</button></div>
+    <div class="modal-corpo">
+      <div class="linha" style="align-items:end"><label>Dia<input type="date" id="es-data" value="${data}"></label>
+        <p class="muted pequeno" style="margin:0 0 12px">${CONFIG.espera_auto ? 'Quando alguém desmarca neste dia, quem está aqui é avisado no WhatsApp na hora.' : 'O aviso automático está desligado em Configurações → Agenda.'}</p></div>
+      <div class="tabela-wrap cartao" style="margin-bottom:14px"><table><thead><tr><th>Cliente</th><th>Quer</th><th>Horário</th><th>Situação</th><th></th></tr></thead><tbody>
+        ${lista.map((e) => `<tr>
+          <td><b>${esc(e.cliente_nome)}</b><div class="sub2">${fone(e.telefone)}${e.obs ? ' · ' + esc(e.obs) : ''}</div></td>
+          <td>${esc(e.servico_nome || 'Qualquer serviço')}<div class="sub2">${e.profissional_nome ? esc(e.profissional_nome) : 'com qualquer profissional'}</div></td>
+          <td>${faixa(e)}</td>
+          <td><span class="tag ${e.status === 'marcado' ? 'pago' : e.status === 'avisado' ? 'aberto' : ''}">${NOME_ESPERA[e.status] || e.status}</span>${e.avisado_em ? `<div class="sub2">avisado ${brDataHora(e.avisado_em)}</div>` : ''}</td>
+          <td class="num">${['aguardando', 'avisado'].includes(e.status) ? `<button class="btn mini verde" data-es-marcar="${e.id}">${ic('agenda')} Marcar</button>` : ''}
+            <button class="btn mini" data-es-del="${e.id}" title="Tirar da lista" aria-label="Tirar da lista">${ic('lixo')}</button></td></tr>`).join('') || '<tr><td colspan="5" class="vazio">Ninguém esperando neste dia.</td></tr>'}
+      </tbody></table></div>
+      <form id="f-es" class="cartao pad">
+        <h3>Colocar na lista</h3>
+        <div class="linha"><label>Nome<input name="cliente_nome" required list="es-sug" autocomplete="off"><datalist id="es-sug"></datalist></label>
+          <label>WhatsApp<input name="telefone" required placeholder="51 99999-9999"></label></div>
+        <div class="linha"><label>Serviço<select name="servico_id"><option value="">Qualquer</option>${servs.map((s) => `<option value="${s.id}">${esc(s.nome)}</option>`).join('')}</select></label>
+          <label>Profissional<select name="profissional_id">${ativos.length > 1 ? '<option value="">Qualquer um</option>' : ''}${ativos.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}</select></label></div>
+        <div class="linha"><label>A partir de (opcional)<input type="time" name="hora_de"></label><label>Até (opcional)<input type="time" name="hora_ate"></label></div>
+        <label>Observação<input name="obs" placeholder="ex.: prefere de manhã"></label>
+        <p class="erro-txt" id="es-erro"></p>
+        <button class="btn primario">${ic('mais')} Colocar na lista</button>
+      </form>
+    </div>
+    <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button></div>`, true);
+  $('#es-data').onchange = (e) => { if (e.target.value) modalEspera(e.target.value); };
+  const f = $('#f-es');
+  // sugestões de clientes já conhecidos
+  let sug = [];
+  f.cliente_nome.oninput = async () => {
+    const t = f.cliente_nome.value.trim();
+    const achou = sug.find((x) => x.nome === t);
+    if (achou) { f.telefone.value = fone(achou.telefone); f._cliente_id = achou.cliente_id; return; }
+    if (t.length < 2) return;
+    sug = await api(`/agenda/clientes?q=${encodeURIComponent(t)}`).catch(() => []);
+    $('#es-sug').innerHTML = sug.map((x) => `<option value="${esc(x.nome)}">${fone(x.telefone)}</option>`).join('');
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { data: $('#es-data').value, cliente_nome: f.cliente_nome.value, telefone: f.telefone.value, cliente_id: f._cliente_id || null,
+      servico_id: f.servico_id.value || null, profissional_id: f.profissional_id.value || null, hora_de: f.hora_de.value, hora_ate: f.hora_ate.value, obs: f.obs.value };
+    try { await api('/espera', { method: 'POST', body }); toast('Colocado na lista de espera ✓'); modalEspera(body.data); desenharAgenda(); }
+    catch (err) { $('#es-erro').textContent = err.message; }
+  };
+  $$('[data-es-del]').forEach((b) => b.onclick = async () => {
+    await api(`/espera/${b.dataset.esDel}`, { method: 'DELETE' }); modalEspera($('#es-data').value); desenharAgenda();
+  });
+  $$('[data-es-marcar]').forEach((b) => b.onclick = () => {
+    const e = lista.find((x) => String(x.id) === b.dataset.esMarcar);
+    const sv = AG.servs.find((s) => s.id === e.servico_id);
+    fecharModal();
+    modalAgendamento(null, {
+      data: e.data, hora: e.hora_de || null, profissional_id: e.profissional_id || (ativos[0] && ativos[0].id),
+      cliente_nome: e.cliente_nome, telefone: e.telefone, cliente_id: e.cliente_id, servico_id: e.servico_id, duracao: sv ? sv.duracao_min : undefined,
+      aoSalvar: () => api(`/espera/${e.id}`, { method: 'PUT', body: { status: 'marcado' } }).catch(() => {}),
+    });
+  });
 }

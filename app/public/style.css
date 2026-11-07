@@ -80,6 +80,7 @@ nav a {
 nav a i { font-style: normal; width: 18px; text-align: center; opacity: .9; }
 nav a:hover { background: rgba(255,255,255,.1); opacity: 1; }
 nav a.ativo { background: rgba(255,255,255,.2); opacity: 1; }
+.contador { display: inline-grid; place-items: center; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 99px; background: #ffcf4d; color: #4a3500; font-size: 11px; }
 .badge { margin-left: auto; background: #ffcf4d; color: #4a3500; font-size: 11px; border-radius: 99px; padding: 1px 7px; }
 .ponto { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: #9fb3c2; }
 .ponto.on { background: #4ee39b; box-shadow: 0 0 0 3px rgba(78,227,155,.25); }
@@ -220,6 +221,31 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(var(--sombra
 .vars code { background: #eef3f6; padding: 1px 5px; border-radius: 5px; cursor: pointer; }
 
 .codigo { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; background: #f4f7f9; padding: 10px; border-radius: 8px; word-break: break-all; }
+
+.mod-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 14px; margin-bottom: 8px; }
+.mod-item { margin: 0; padding: 8px 10px; border: 1px solid var(--borda); border-radius: 10px; align-items: flex-start; }
+.mod-item span { display: flex; flex-direction: column; }
+.mod-item small { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.mod-item:has(input:checked) { border-color: var(--azul-3); background: var(--azul-claro); }
+
+/* ---------- Gráficos (relatórios) ---------- */
+.grafico { position: relative; }
+.grafico svg { display: block; overflow: visible; }
+.gr-grade { stroke: #edf1f4; stroke-width: 1; }
+.gr-base { stroke: #c9d4dd; stroke-width: 1; }
+.gr-eixo { fill: var(--muted); font-size: 11px; font-family: inherit; }
+.gr-barra { fill: var(--azul-3); opacity: .85; transition: opacity .12s; }
+.gr-col { cursor: pointer; }
+.gr-col .gr-alvo { fill: transparent; }
+.gr-col:hover .gr-barra { opacity: 1; }
+.gr-col:hover .gr-alvo { fill: rgba(16, 38, 58, .035); }
+.gr-col.sel .gr-barra { opacity: 1; fill: var(--azul-1); }
+.gr-col.sel text { fill: var(--texto); font-weight: 700; }
+.gr-dica { position: absolute; pointer-events: none; background: #fff; border: 1px solid var(--borda); border-radius: 10px; box-shadow: 0 8px 24px rgba(16,38,58,.14); padding: 9px 12px; font-size: 12.5px; min-width: 170px; z-index: 5; }
+.gr-dica-v { font-size: 17px; font-weight: 700; margin: 2px 0 4px; }
+.gr-dica-l { display: flex; justify-content: space-between; gap: 14px; color: var(--muted); }
+.gr-dica-l b { color: var(--texto); font-weight: 600; }
+tr.linha-sel td { background: var(--azul-claro); }
 
 /* ---------- Abas da configuração ---------- */
 .abas-cfg { display: flex; gap: 6px; margin-bottom: 14px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }

@@ -9,6 +9,9 @@ const USR = require('./usuarios');
 const AG = require('./agenda');
 const FIN = require('./financeiro');
 const REL = require('./relacionamento');
+const ESP = require('./espera');
+const PAC = require('./pacotes');
+const RELAT = require('./relatorios');
 const U = require('./util');
 
 const app = express();
@@ -174,10 +177,19 @@ app.get('/marca/logo', async (req, res) => {
 REL.rotasPublicas(app);
 
 // ---------- Proteção das rotas da API ----------
+const ROTAS_PROF = [
+  ['GET', /^\/api\/me$/], ['POST', /^\/api\/me\/senha$/], ['GET', /^\/api\/config$/], ['GET', /^\/api\/whatsapp\/estado$/],
+  ['GET', /^\/api\/agenda(\/.*)?$/], ['POST', /^\/api\/agenda$/], ['PUT', /^\/api\/agenda\/\d+$/], ['DELETE', /^\/api\/agenda\/\d+$/],
+  ['POST', /^\/api\/agenda\/\d+\/(status|whatsapp)$/], ['*', /^\/api\/espera(\/.*)?$/], ['GET', /^\/api\/pacotes\/cliente$/],
+];
 app.use('/api', (req, res, next) => {
   usuarioDaSessao(req).then((u) => {
     if (!u) return res.status(401).json({ erro: 'Faça login' });
     req.usuario = u;
+    // usuário de profissional: só a própria agenda, comissões e lista de espera
+    if (USR.ehProf(u) && !ROTAS_PROF.some(([m, re]) => (m === '*' || m === req.method) && re.test(req.path))) {
+      return res.status(403).json({ erro: 'Seu usuário só tem acesso à sua agenda.' });
+    }
     next();
   }).catch(next);
 });
@@ -226,6 +238,9 @@ app.delete('/api/usuarios/:id', pode('usuarios'), rota(async (req, res) => { awa
 AG.rotas(app, { rota, pode });
 FIN.rotas(app, { rota, pode });
 REL.rotas(app, { rota, pode });
+ESP.rotas(app, { rota, pode });
+PAC.rotas(app, { rota, pode });
+RELAT.rotas(app, { rota, pode });
 
 // ---------- Painel ----------
 app.get('/api/painel', rota(async (req, res) => {
@@ -520,7 +535,13 @@ app.post('/api/whatsapp/teste', pode('whatsapp'), rota(async (req, res) => {
 }));
 
 // ---------- Configurações ----------
-app.get('/api/config', rota(async (req, res) => res.json(await cfg.obter())));
+app.get('/api/config', rota(async (req, res) => {
+  const c = await cfg.obter();
+  if (!USR.ehProf(req.usuario)) return res.json(c);
+  // profissional não precisa ver Pix nem textos de cobrança
+  const { pix_chave, pix_nome, pix_tipo, regua, ...resto } = c;
+  res.json(resto);
+}));
 app.put('/api/config', rota(async (req, res) => {
   const b = { ...(req.body || {}) };
   const MARCA = ['sistema_nome', 'tema'];
@@ -530,6 +551,21 @@ app.put('/api/config', rota(async (req, res) => {
     if (MARCA.includes(k) ? !podeMarca : !podeCfg) delete b[k];
   }
   if (!Object.keys(b).length) throw erro(403, 'Seu usuário não tem permissão para alterar isso.');
+  // ramo do negócio e módulos (o formulário manda mod_agenda, mod_caixa...)
+  const modForm = Object.keys(b).filter((k) => k.startsWith('mod_'));
+  if (modForm.length) {
+    b.modulos = Object.fromEntries(cfg.MODULOS.map((m) => [m, !!b['mod_' + m]]));
+    modForm.forEach((k) => delete b[k]);
+  }
+  if ('ramo' in b) {
+    if (!cfg.RAMOS[b.ramo]) throw erro(400, 'Ramo de negócio inválido');
+    const atual = await cfg.obter();
+    if (b.ramo !== atual.ramo && !modForm.length) b.modulos = null; // trocou de ramo: módulos do ramo novo
+  }
+  if ('modulos' in b && b.modulos !== null) {
+    if (typeof b.modulos !== 'object') throw erro(400, 'Módulos inválidos');
+    b.modulos = Object.fromEntries(cfg.MODULOS.map((m) => [m, !!b.modulos[m]]));
+  }
   if (b.regua) {
     if (!Array.isArray(b.regua)) throw erro(400, 'Régua inválida');
     b.regua = b.regua.map((e, i) => ({
@@ -538,7 +574,7 @@ app.put('/api/config', rota(async (req, res) => {
     const dias = b.regua.map((e) => e.dias);
     if (new Set(dias).size !== dias.length) throw erro(400, 'Duas etapas da régua não podem ter o mesmo dia');
   }
-  for (const k of ['intervalo_min', 'intervalo_max', 'limite_diario', 'tolerancia_dias', 'agenda_intervalo', 'agenda_lembrete_horas', 'retorno_dias', 'retorno_limite', 'online_antecedencia_min', 'online_dias']) if (k in b) b[k] = Math.max(0, parseInt(b[k], 10) || 0);
+  for (const k of ['intervalo_min', 'intervalo_max', 'limite_diario', 'tolerancia_dias', 'agenda_intervalo', 'agenda_lembrete_horas', 'retorno_dias', 'retorno_limite', 'online_antecedencia_min', 'online_dias', 'espera_qtd_aviso']) if (k in b) b[k] = Math.max(0, parseInt(b[k], 10) || 0);
   if ('retorno_dias' in b && b.retorno_dias < 7) throw erro(400, 'O retorno precisa ser de pelo menos 7 dias');
   if ('online_dias' in b) b.online_dias = Math.min(90, Math.max(1, b.online_dias));
   if (b.intervalo_min > b.intervalo_max) throw erro(400, 'Intervalo mínimo maior que o máximo');
@@ -549,6 +585,8 @@ app.put('/api/config', rota(async (req, res) => {
   }
   res.json(await cfg.salvar(b));
 }));
+
+app.post('/api/config/mensagens-ramo', pode('configuracoes'), rota(async (req, res) => res.json(await cfg.usarMensagensDoRamo())));
 
 app.put('/api/marca/logo', pode('personalizacao'), rota(async (req, res) => {
   const m = /^data:(image\/(png|jpeg|webp|svg\+xml));base64,(.+)$/.exec(String((req.body && req.body.imagem) || ''));
@@ -595,7 +633,7 @@ app.get('/api/exportar/cobrancas.csv', rota(async (req, res) => {
 app.get('/api/exportar/backup.json', pode('configuracoes'), rota(async (req, res) => {
   const tabelas = {};
   for (const t of ['config', 'clientes', 'cobrancas', 'mensagens', 'consumos', 'produtos', 'vendas', 'caixa_movimentos',
-    'profissionais', 'servicos', 'agendamentos', 'retornos_enviados']) {
+    'profissionais', 'servicos', 'agendamentos', 'retornos_enviados', 'lista_espera', 'pacotes', 'pacotes_clientes', 'pacote_usos']) {
     tabelas[t] = (await q(`SELECT * FROM ${t}`).catch(() => ({ rows: [] }))).rows;
   }
   // comprovantes sem o arquivo (imagem), para o backup não ficar enorme
@@ -615,6 +653,10 @@ migrar().then(async () => {
   await AG.iniciar();
   await FIN.iniciar();
   await REL.iniciar();
+  await ESP.iniciar();
+  await PAC.iniciar();
+  setInterval(() => PAC.tick(), 60000);
+  PAC.tick();
   setInterval(() => AG.tickLembretes(), 60000);
   setInterval(() => REL.tickRetorno(), 60000);
   await C.gerarCobrancas();
