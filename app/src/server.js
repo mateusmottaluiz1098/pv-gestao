@@ -187,7 +187,9 @@ app.use('/api', (req, res, next) => {
     if (!u) return res.status(401).json({ erro: 'Faça login' });
     req.usuario = u;
     // usuário de profissional: só a própria agenda, comissões e lista de espera
-    if (USR.ehProf(u) && !ROTAS_PROF.some(([m, re]) => (m === '*' || m === req.method) && re.test(req.path))) {
+    // caminho completo (dentro do app.use('/api') o req.path vem sem o /api)
+    const caminho = String(req.originalUrl || req.url || '').split('?')[0];
+    if (USR.ehProf(u) && !ROTAS_PROF.some(([m, re]) => (m === '*' || m === req.method) && re.test(caminho))) {
       return res.status(403).json({ erro: 'Seu usuário só tem acesso à sua agenda.' });
     }
     next();
