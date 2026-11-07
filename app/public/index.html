@@ -22,25 +22,25 @@
     <aside class="sidebar">
       <div class="logo"><span class="logo-marca"></span> <span class="nome-sistema">PV Gestão</span></div>
       <nav id="menu">
-        <a href="#/painel" data-pg="painel"><i>◫</i>Visão geral</a>
-        <a href="#/agenda" data-pg="agenda"><i>▦</i>Agenda</a>
-        <a href="#/caixa" data-pg="caixa"><i>$</i>Caixa</a>
-        <a href="#/clientes" data-pg="clientes"><i>♙</i>Clientes</a>
-        <a href="#/cobrancas" data-pg="cobrancas"><i>▤</i>Cobranças</a>
-        <a href="#/comprovantes" data-pg="comprovantes"><i>⎙</i>Comprovantes <b id="badge-comp" class="badge hidden"></b></a>
-        <a href="#/whatsapp" data-pg="whatsapp"><i>◉</i>WhatsApp <b id="badge-wa" class="ponto"></b></a>
-        <a href="#/config" data-pg="config"><i>⚙</i>Configurações</a>
-        <a href="#/personalizacao" data-pg="personalizacao"><i>◐</i>Personalização</a>
-        <a href="#/usuarios" data-pg="usuarios"><i>☺</i>Usuários</a>
+        <a href="#/painel" data-pg="painel"><i data-ic="painel"></i>Visão geral</a>
+        <a href="#/agenda" data-pg="agenda"><i data-ic="agenda"></i>Agenda</a>
+        <a href="#/caixa" data-pg="caixa"><i data-ic="caixa"></i>Caixa</a>
+        <a href="#/clientes" data-pg="clientes"><i data-ic="clientes"></i>Clientes</a>
+        <a href="#/cobrancas" data-pg="cobrancas"><i data-ic="cobrancas"></i>Cobranças</a>
+        <a href="#/comprovantes" data-pg="comprovantes"><i data-ic="comprovantes"></i>Comprovantes <b id="badge-comp" class="badge hidden"></b></a>
+        <a href="#/whatsapp" data-pg="whatsapp"><i data-ic="whatsapp"></i>WhatsApp <b id="badge-wa" class="ponto"></b></a>
+        <a href="#/config" data-pg="config"><i data-ic="config"></i>Configurações</a>
+        <a href="#/personalizacao" data-pg="personalizacao"><i data-ic="personalizacao"></i>Personalização</a>
+        <a href="#/usuarios" data-pg="usuarios"><i data-ic="usuarios"></i>Usuários</a>
       </nav>
       <div class="sidebar-rodape">
         <div class="eu"><b id="eu-nome"></b></div>
-        <button id="btn-senha" class="link-claro">Trocar senha</button> · <button id="btn-sair" class="link-claro">Sair</button>
+        <button id="btn-senha" class="link-claro"><i data-ic="chave"></i>Trocar senha</button><button id="btn-sair" class="link-claro"><i data-ic="sair"></i>Sair</button>
       </div>
     </aside>
     <main>
       <header class="topo">
-        <button id="btn-menu" class="btn-menu" aria-label="Menu">☰</button>
+        <button id="btn-menu" class="btn-menu" aria-label="Menu"><i data-ic="menu"></i></button>
         <div class="trilha"><span class="nome-sistema">PV Gestão</span> / <b id="trilha-pg"></b></div>
         <div id="topo-data" class="muted"></div>
       </header>
@@ -50,6 +50,7 @@
 
   <div id="modal" class="modal hidden"><div class="modal-caixa" id="modal-caixa"></div></div>
   <div id="toast" class="toast hidden"></div>
+  <script src="/icones.js"></script>
   <script src="/agenda.js"></script>
   <script src="/financeiro.js"></script>
   <script src="/app.js"></script>

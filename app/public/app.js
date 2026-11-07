@@ -1,6 +1,7 @@
 /* PV Gestão — interface */
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+aplicarIcones();
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const brData = (s) => { if (!s) return ''; const [y, m, d] = String(s).slice(0, 10).split('-'); return `${d}/${m}/${y}`; };
@@ -25,7 +26,7 @@ async function api(caminho, opcoes = {}) {
 
 function toast(msg, erro = false) {
   const t = $('#toast');
-  t.textContent = msg;
+  t.innerHTML = (erro ? ic('alerta') : ic('check')) + `<span>${esc(String(msg).replace(/\s*✓$/, ''))}</span>`;
   t.className = 'toast' + (erro ? ' erro' : '');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => t.classList.add('hidden'), erro ? 5000 : 2800);
@@ -84,7 +85,7 @@ function statusCobranca(cb) {
 
 // ---------- Marca (nome, logo, cor) ----------
 let MARCA = { sistema_nome: 'PV Gestão', tema: 'azul', tem_logo: false };
-const ICONE_PADRAO = '✓';
+const ICONE_PADRAO = ic('check');
 function aplicarMarca(m) {
   MARCA = { ...MARCA, ...m };
   document.documentElement.dataset.tema = MARCA.tema || 'azul';
@@ -147,9 +148,17 @@ async function rotear() {
   $('#trilha-pg').textContent = titulo;
   document.body.dataset.pg = pg;
   $('.sidebar').classList.remove('aberta');
-  $('#conteudo').innerHTML = '<p class="muted">Carregando…</p>';
-  try { await fn($('#conteudo')); aplicarPermissoes($('#conteudo')); } catch (e) { $('#conteudo').innerHTML = `<div class="aviso">${esc(e.message)}</div>`; }
+  // cada navegação ganha uma área nova: se a página anterior ainda estiver carregando,
+  // ela termina numa área que já saiu da tela e não sobrescreve a página atual
+  const velho = $('#conteudo');
+  const el = document.createElement('section');
+  el.id = 'conteudo';
+  el.innerHTML = '<p class="muted">Carregando…</p>';
+  velho.replaceWith(el);
+  const minha = ++rotear.seq;
+  try { await fn(el); if (minha === rotear.seq) aplicarPermissoes(el); } catch (e) { if (minha === rotear.seq) el.innerHTML = `<div class="aviso">${esc(e.message)}</div>`; }
 }
+rotear.seq = 0;
 window.addEventListener('hashchange', rotear);
 
 // Esconde botões que o usuário não pode usar (o servidor também bloqueia)
@@ -167,7 +176,31 @@ function aplicarPermissoes(raiz) {
     if (!pode(perm)) $$(sel, raiz).forEach((e) => e.classList.add('hidden'));
   }
 }
-new MutationObserver(() => { if (EU) { aplicarPermissoes($('#conteudo')); aplicarPermissoes($('#modal-caixa')); } })
+// no celular as tabelas viram cartões: cada célula ganha o nome da coluna
+function rotularTabelas(raiz) {
+  $$('table', raiz).forEach((t) => {
+    if (t.closest('td') || !t.tHead) return;
+    const nomes = [...t.tHead.rows[0].cells].map((th) => th.textContent.trim());
+    t.classList.add('resp');
+    for (const tr of t.tBodies[0] ? t.tBodies[0].rows : []) {
+      [...tr.cells].forEach((td, i) => {
+        if (td.hasAttribute('data-label')) return;
+        const rotulo = td.colSpan > 1 ? '' : (nomes[i] || '');
+        td.setAttribute('data-label', rotulo);
+        // conteúdo com mais de uma linha fica empilhado do lado direito
+        if (rotulo && i > 0 && td.children.length && td.childNodes.length > 1) {
+          const v = document.createElement('span'); v.className = 'td-v';
+          while (td.firstChild) v.appendChild(td.firstChild);
+          td.appendChild(v);
+        }
+      });
+    }
+  });
+}
+new MutationObserver(() => {
+  aplicarIcones();
+  if (EU) { aplicarPermissoes($('#conteudo')); aplicarPermissoes($('#modal-caixa')); rotularTabelas($('#conteudo')); rotularTabelas($('#modal-caixa')); }
+})
   .observe(document.body, { childList: true, subtree: true });
 
 async function atualizarIndicadores() {
@@ -227,17 +260,22 @@ async function pgPainel(el) {
   const ex = d.execucao;
   el.innerHTML = `
     <div class="cabecalho">
-      <div><div class="sobretitulo">PAINEL DE COBRANÇAS</div><h1>${saud} 👋</h1><div class="muted">Resumo de ${dataExt}.</div></div>
-      <div class="acoes"><button class="btn primario" id="novo-cli">＋ Novo cliente</button></div>
+      <div><div class="sobretitulo">${esc(CONFIG.empresa || 'Visão geral')}</div><h1>${saud} 👋</h1><div class="muted">Resumo de ${dataExt}.</div></div>
+      <div class="acoes"><button class="btn primario" id="novo-cli">${ic('mais')} Novo cliente</button></div>
     </div>
-    ${d.agenda && d.agenda.usa_agenda ? `<div class="cartao" style="margin-bottom:14px"><div class="cartao-topo"><div><h2>Agenda de hoje</h2><div class="muted pequeno">${d.agenda.total} atendimento(s) · ${d.agenda.concluidos} concluído(s) · previsto ${brl(d.agenda.previsto)} · recebido ${brl(d.agenda.recebido)}</div></div><a class="btn" href="#/agenda">Abrir agenda →</a></div>
+    ${d.agenda && d.agenda.usa_agenda ? `<div class="cartao" style="margin-bottom:14px"><div class="cartao-topo"><div><h2>Agenda de hoje</h2><div class="muted pequeno">${d.agenda.total} atendimento(s) · ${d.agenda.concluidos} concluído(s) · previsto ${brl(d.agenda.previsto)} · recebido ${brl(d.agenda.recebido)}</div></div><a class="btn" href="#/agenda">${ic('agenda')} Abrir agenda</a></div>
       ${d.agenda.proximos.length ? d.agenda.proximos.map((a) => `<div class="lista-item"><span class="ag-ponto" style="background:${esc(a.cor)}"></span><div class="cresce"><b>${a.inicio_local.slice(11)}</b> · ${esc(a.cliente_nome)} <span class="muted pequeno">${esc(a.servico_nome || '')} · ${esc(a.profissional_nome)}</span></div>${a.status === 'confirmado' ? '<span class="tag pago">Confirmado</span>' : '<span class="tag aberto">Agendado</span>'}</div>`).join('') : '<div class="vazio" style="padding:18px">Nenhum horário pendente para hoje.</div>'}</div>` : ''}
-    ${d.comprovantes_pendentes ? `<div class="aviso">📎 ${d.comprovantes_pendentes} comprovante(s) aguardando sua conferência. <a href="#/comprovantes">Conferir agora →</a></div>` : ''}
+    ${d.comprovantes_pendentes ? `<div class="aviso">${ic('clip')} ${d.comprovantes_pendentes} comprovante(s) aguardando sua conferência. <a href="#/comprovantes">Conferir agora →</a></div>` : ''}
     <div class="grade g4">
-      <div class="cartao kpi"><div class="rotulo">Clientes ativos <span class="icone">♙</span></div><div class="valor">${d.ativos}</div><div class="det">Previsto no mês: ${brl(d.previsto_mes)}</div></div>
-      <div class="cartao kpi"><div class="rotulo">Vencem hoje <span class="icone">◷</span></div><div class="valor">${d.vencem_hoje.n}</div><div class="det">${brl(d.vencem_hoje.v)} em cobranças</div></div>
-      <div class="cartao kpi ${d.atraso.n ? 'alerta' : ''}"><div class="rotulo">Em atraso <span class="icone">!</span></div><div class="valor">${d.atraso.n}</div><div class="det">${brl(d.atraso.v)} pendentes</div></div>
-      <div class="cartao kpi ok"><div class="rotulo">Recebido no mês <span class="icone">✓</span></div><div class="valor">${brl(d.recebido_mes.v)}</div><div class="det">${d.recebido_mes.n} pagamento(s) confirmado(s)</div></div>
+      <div class="cartao kpi"><div class="rotulo">Clientes ativos <span class="icone">${ic('clientes')}</span></div><div class="valor">${d.ativos}</div><div class="det">Previsto no mês: ${brl(d.previsto_mes)}</div></div>
+      <div class="cartao kpi"><div class="rotulo">Vencem hoje <span class="icone">${ic('relogio')}</span></div><div class="valor">${d.vencem_hoje.n}</div><div class="det">${brl(d.vencem_hoje.v)} em cobranças</div></div>
+      <div class="cartao kpi ${d.atraso.n ? 'alerta' : ''}"><div class="rotulo">Em atraso <span class="icone">${ic('alerta')}</span></div><div class="valor">${d.atraso.n}</div><div class="det">${brl(d.atraso.v)} pendentes</div></div>
+      <div class="cartao kpi ok"><div class="rotulo">Recebido no mês <span class="icone">${ic('check')}</span></div>${(() => {
+        const r = d.recebido_mes; const at = r.atendimentos || { n: 0, v: 0 }; const vd = r.vendas || { n: 0, v: 0 };
+        const total = Number(r.v) + at.v + vd.v + Number(r.outros || 0);
+        const partes = [r.n ? `cobranças ${brl(r.v)}` : '', at.n ? `atendimentos ${brl(at.v)}` : '', vd.n ? `produtos ${brl(vd.v)}` : '', r.outros ? `outros ${brl(r.outros)}` : ''].filter(Boolean);
+        return `<div class="valor">${brl(total)}</div><div class="det">${partes.join(' · ') || 'nenhum pagamento ainda'}</div>`;
+      })()}</div>
     </div>
     <div class="grade g2" style="margin-top:14px">
       <div class="cartao">
@@ -285,7 +323,7 @@ function desenharExecucao(ex, tamFila) {
   } else {
     if (box.dataset.rodou === '1') { box.dataset.rodou = ''; rotear(); return; }
     box.innerHTML = ex.fim ? `<div style="padding:10px 18px;border-bottom:1px solid var(--borda)" class="muted pequeno">Última execução: ${ex.enviados} enviada(s), ${ex.erros} erro(s)${ex.ultimoErro ? ` — ${esc(ex.ultimoErro)}` : ''}</div>` : '';
-    ac.innerHTML = tamFila ? '<button class="btn primario" id="rodar-fila">▶ Enviar fila agora</button>' : '';
+    ac.innerHTML = tamFila ? `<button class="btn primario" id="rodar-fila">${ic('enviar')} Enviar fila agora</button>` : '';
     const b = $('#rodar-fila');
     if (b) b.onclick = async () => {
       if (!(await confirmar('Enviar fila agora?', `Serão enviadas até ${tamFila} mensagem(ns) pelo WhatsApp, com intervalo entre elas.`, 'Enviar'))) return;
@@ -314,7 +352,7 @@ async function pgClientes(el) {
   const lista = await api('/clientes');
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Clientes</h1><div class="muted">Cadastro e acompanhamento das mensalidades.</div></div>
-      <div class="acoes"><a class="btn" href="/api/exportar/clientes.csv">↓ Exportar CSV</a><button class="btn primario" id="novo-cli">＋ Novo cliente</button></div></div>
+      <div class="acoes"><a class="btn" href="/api/exportar/clientes.csv">${ic('baixar')} Exportar CSV</a><button class="btn primario" id="novo-cli">${ic('mais')} Novo cliente</button></div></div>
     <div class="cartao">
       <div class="cartao-topo"><div class="filtros">
         <input id="busca" placeholder="Buscar por nome, telefone ou identificação" style="min-width:260px" value="${esc(filtroClientes.busca)}">
@@ -458,11 +496,11 @@ async function modalFichaCliente(id) {
     <div class="modal-corpo">
       ${c.observacoes ? `<div class="aviso info">${esc(c.observacoes)}</div>` : ''}
       <div class="cartao-topo" style="padding:0;margin-bottom:8px;border:0"><h3 style="margin:0">Consumo avulso / fiado</h3>
-        <div class="acoes"><button class="btn mini primario" id="lancar-consumo">＋ Lançar consumo</button>${totPend ? `<button class="btn mini" id="cobrar-fiado">Cobrar fiado agora (${brl(totPend)})</button>` : ''}</div></div>
+        <div class="acoes"><button class="btn mini primario" id="lancar-consumo">${ic('mais')} Lançar consumo</button>${totPend ? `<button class="btn mini" id="cobrar-fiado">Cobrar fiado agora (${brl(totPend)})</button>` : ''}</div></div>
       ${totPend ? `<div class="aviso pequeno">Fiado pendurado: <b>${brl(totPend)}</b>. ${c.forma === 'avulso' ? 'Clique em “Cobrar fiado agora” para mandar a cobrança.' : 'Entra sozinho na próxima cobrança do cliente.'}</div>` : ''}
       ${consumos.length ? `<div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Data</th><th>Descrição</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
         ${consumos.slice(0, 30).map((x) => `<tr><td>${brData(x.data)}</td><td>${esc(x.descricao)}${x.origem === 'agenda' ? ' <span class="sub2">agenda</span>' : x.origem === 'produto' ? ' <span class="sub2">produto</span>' : ''}</td><td class="num">${brl(x.valor)}</td><td>${sitConsumo(x)}</td>
-          <td class="num">${x.cob_status === 'pago' ? '' : `<button class="btn mini" data-del-consumo="${x.id}" title="Excluir lançamento">✕</button>`}</td></tr>`).join('')}
+          <td class="num">${x.cob_status === 'pago' ? '' : `<button class="btn mini" data-del-consumo="${x.id}" title="Excluir lançamento" aria-label="Excluir lançamento">${ic('lixo')}</button>`}</td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted pequeno" style="margin-bottom:16px">Nenhum consumo lançado.</p>'}
       <h3>Cobranças</h3>
       <div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Referente a</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
@@ -497,7 +535,7 @@ async function modalFichaCliente(id) {
 function acoesCobranca(cb) {
   if (cb.status === 'pago') return `<button class="btn mini" data-desfazer="${cb.id}">Desfazer</button>`;
   if (cb.status === 'cancelado') return '';
-  return `<button class="btn mini btn-wa" data-previa-cob="${cb.id}">WhatsApp</button> <button class="btn mini" data-pix="${cb.id}">Pix</button> <button class="btn mini verde" data-pagar="${cb.id}" data-valor="${cb.valor}">Pago</button> <button class="btn mini" data-cancelar="${cb.id}" title="Cancelar esta cobrança">✕</button>`;
+  return `<button class="btn mini btn-wa" data-previa-cob="${cb.id}">${ic('whatsapp')} WhatsApp</button> <button class="btn mini" data-pix="${cb.id}">${ic('pix')} Pix</button> <button class="btn mini verde" data-pagar="${cb.id}" data-valor="${cb.valor}">${ic('check')} Pago</button> <button class="btn mini" data-cancelar="${cb.id}" title="Cancelar esta cobrança" aria-label="Cancelar esta cobrança">${ic('fechar')}</button>`;
 }
 
 function ligarAcoesCobranca(raiz, recarregar) {
@@ -554,8 +592,8 @@ async function pgCobrancas(el) {
   const pct = r.previsto ? Math.round((r.recebido / r.previsto) * 100) : 0;
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Cobranças</h1><div class="muted">Mensalidades, semanais, parcelas e avulsas do mês.</div></div>
-      <div class="acoes"><button class="btn" id="mes-ant">←</button><b style="min-width:140px;text-align:center">${MESES[m - 1]} ${y}</b><button class="btn" id="mes-prox">→</button>
-      <a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">↓ CSV</a></div></div>
+      <div class="acoes"><button class="btn" id="mes-ant" aria-label="Mês anterior">${ic('esquerda')}</button><b style="min-width:140px;text-align:center">${MESES[m - 1]} ${y}</b><button class="btn" id="mes-prox" aria-label="Próximo mês">${ic('direita')}</button>
+      <a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">${ic('baixar')} CSV</a></div></div>
     ${d.anteriores.n ? `<div class="aviso">Há ${d.anteriores.n} cobrança(s) de meses anteriores ainda em aberto (${brl(d.anteriores.v)}). <a href="#" id="ver-atrasadas">Ver lista →</a></div>` : ''}
     <div class="grade g4">
       <div class="cartao kpi"><div class="rotulo">Previsto</div><div class="valor">${brl(r.previsto)}</div><div class="det">${r.qtd} cobrança(s)</div></div>
@@ -617,7 +655,7 @@ async function pgComprovantes(el) {
           ${cp.status === 'pendente' ? `
             <label style="margin-top:10px">Referente a
               <select data-cob="${cp.id}">${cp.abertas.length ? cp.abertas.map((a) => `<option value="${a.id}" ${a.id === cp.cobranca_id ? 'selected' : ''}>Venc. ${brData(a.vencimento)} · ${brl(a.valor)}</option>`).join('') : '<option value="">Nenhuma cobrança em aberto</option>'}</select></label>
-            <div class="acoes"><button class="btn verde" data-aceitar="${cp.id}" ${cp.abertas.length ? '' : 'disabled'}>✓ Confirmar pagamento</button><button class="btn perigo" data-recusar="${cp.id}">Recusar</button></div>`
+            <div class="acoes"><button class="btn verde" data-aceitar="${cp.id}" ${cp.abertas.length ? '' : 'disabled'}>${ic('check')} Confirmar pagamento</button><button class="btn perigo" data-recusar="${cp.id}">Recusar</button></div>`
             : `<div style="margin-top:8px"><span class="tag ${cp.status}">${cp.status === 'aceito' ? 'Confirmado' : 'Recusado'}</span> ${cp.vencimento ? `<span class="muted pequeno">venc. ${brData(cp.vencimento)} · ${brl(cp.valor)}</span>` : ''}</div>`}
         </div>
       </div>`).join('')}</div>`
@@ -662,12 +700,12 @@ function desenharWa(st) {
   if (!box) return;
   if (st.estado === 'offline' || st.estado === 'erro') {
     box.innerHTML = `<h3>Serviço do WhatsApp indisponível</h3><div class="aviso">${esc(st.erro || 'A Evolution API não respondeu.')}</div>
-      <p class="muted pequeno">No Mac, confira se o Docker está aberto e rode novamente o <b>iniciar.command</b>.</p><button class="btn" id="wa-tentar">Tentar de novo</button>`;
+      <p class="muted pequeno">O serviço do WhatsApp do servidor não respondeu. Tente de novo em alguns minutos; se continuar, avise o suporte.</p><button class="btn" id="wa-tentar">Tentar de novo</button>`;
     $('#wa-tentar').onclick = rotear;
     return;
   }
   if (st.conectado) {
-    box.innerHTML = `<div class="aviso ok">✓ Conectado${st.numero ? ` ao número <b>${fone(st.numero)}</b>` : ''}${st.nome ? ` (${esc(st.nome)})` : ''}</div>
+    box.innerHTML = `<div class="aviso ok">${ic('check')} Conectado${st.numero ? ` ao número <b>${fone(st.numero)}</b>` : ''}${st.nome ? ` (${esc(st.nome)})` : ''}</div>
       <h3>Enviar mensagem de teste</h3>
       <div class="filtros"><input id="wa-num" placeholder="51 99999-9999" style="min-width:200px"><button class="btn primario" id="wa-teste">Enviar teste</button></div>
       <p class="muted pequeno" style="margin-top:20px">Para trocar de número, desconecte e escaneie o QR code com o outro aparelho.</p>
@@ -713,14 +751,50 @@ async function conectarWa() {
 }
 
 // ---------- Configurações ----------
+// organiza os quadros da configuração em abas (o formulário continua um só)
+const ABAS_CFG = [
+  ['cobranca', 'Cobrança e Pix', 'cobrancas', /Empresa|Régua|Envio automático|Após o pagamento|comprovante|avulsa/i],
+  ['agenda', 'Agenda', 'agenda', /^Agenda$/i],
+  ['online', 'Agendamento online', 'link', /Agendamento online/i],
+  ['retorno', 'Retorno de clientes', 'whatsapp', /Retorno/i],
+];
+function abasConfig(el) {
+  const f = $('#f-cfg', el);
+  const cartoes = $$('.cartao.pad', f);
+  const area = document.createElement('div');
+  area.className = 'cfg-cartoes';
+  for (const c of cartoes) {
+    const t = (($('h3', c) || {}).textContent || '').trim();
+    const aba = ABAS_CFG.find((a) => a[3].test(t)) || ABAS_CFG[0];
+    c.dataset.aba = aba[0]; c.style.margin = '';
+    area.appendChild(c);
+  }
+  const grade = $('.grade', f); if (grade) grade.replaceWith(area); else f.prepend(area);
+  const barra = document.createElement('div');
+  barra.className = 'abas-cfg';
+  barra.innerHTML = ABAS_CFG.map(([id, nome, icone]) => `<button type="button" data-aba="${id}">${ic(icone)}<span>${nome}</span></button>`).join('');
+  f.before(barra);
+  const mostrar = (id) => {
+    $$('button', barra).forEach((b) => b.classList.toggle('sel', b.dataset.aba === id));
+    let n = 0;
+    for (const c of $$('.cartao.pad', area)) { const on = c.dataset.aba === id; c.classList.toggle('hidden', !on); if (on) n++; }
+    area.classList.toggle('uma', n === 1);
+    try { localStorage.setItem('cfg_aba', id); } catch (e) { /* sem storage */ }
+  };
+  $$('button', barra).forEach((b) => b.onclick = () => mostrar(b.dataset.aba));
+  let ini = 'cobranca';
+  try { ini = localStorage.getItem('cfg_aba') || ini; } catch (e) { /* sem storage */ }
+  mostrar(ABAS_CFG.some((a) => a[0] === ini) ? ini : 'cobranca');
+}
+
 async function pgConfig(el) {
   const c = await api('/config');
   CONFIG = c;
   const opcoesDias = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 25, 30];
   const nomeDia = (d) => d < 0 ? `${-d} dia(s) antes` : d === 0 ? 'No dia do vencimento' : `${d} dia(s) depois`;
   el.innerHTML = `
-    <div class="cabecalho"><div><h1>Configurações</h1><div class="muted">Pix, régua de cobrança e envio automático.</div></div>
-      <div class="acoes"><a class="btn" href="/api/exportar/backup.json">↓ Backup</a><button class="btn primario" id="salvar-cfg">Salvar configurações</button></div></div>
+    <div class="cabecalho"><div><h1>Configurações</h1><div class="muted">Cobrança, Pix, agenda e mensagens automáticas.</div></div>
+      <div class="acoes"><a class="btn" href="/api/exportar/backup.json">${ic('baixar')} Backup</a><button class="btn primario" id="salvar-cfg">Salvar configurações</button></div></div>
     <form id="f-cfg">
     <div class="grade g2">
       <div>
@@ -732,7 +806,7 @@ async function pgConfig(el) {
             <label>Chave Pix<input name="pix_chave" value="${esc(c.pix_chave)}"></label>
           </div>
           <div class="linha">
-            <label>Nome do recebedor (como no banco)<input name="pix_nome" value="${esc(c.pix_nome)}" placeholder="ex.: MATEUS MOTTA"></label>
+            <label>Nome do recebedor (como no banco)<input name="pix_nome" value="${esc(c.pix_nome)}" placeholder="ex.: JOAO DA SILVA"></label>
             <label>Cidade<input name="pix_cidade" value="${esc(c.pix_cidade)}"></label>
           </div>
           <label class="check"><input type="checkbox" name="enviar_pix_copia_cola" ${c.enviar_pix_copia_cola ? 'checked' : ''}> Enviar o “Pix copia e cola” já com o valor (mensagem separada, fácil de copiar)</label>
@@ -744,7 +818,7 @@ async function pgConfig(el) {
           <div class="vars">Campos: ${['primeiro_nome', 'nome', 'valor', 'vencimento', 'descricao', 'dias_atraso', 'empresa', 'parcela', 'mes', 'total_aberto', 'pix'].map((v) => `<code data-var="{${v}}">{${v}}</code>`).join(' ')}</div>
           <p class="muted pequeno">{descricao} vira “mensalidade de novembro/2026”, “semana de 07/11”, “parcela 3/10” ou o que foi consumido (ex.: Corte).</p>
           <div id="regua"></div>
-          <button type="button" class="btn" id="add-etapa">＋ Adicionar etapa</button>
+          <button type="button" class="btn" id="add-etapa">${ic('mais')} Adicionar etapa</button>
         </div>
       </div>
       <div>
@@ -758,7 +832,7 @@ async function pgConfig(el) {
           <div class="linha"><label>Não enviar antes de<input type="time" name="janela_inicio" value="${esc(c.janela_inicio)}"></label>
             <label>Não enviar depois de<input type="time" name="janela_fim" value="${esc(c.janela_fim)}"></label></div>
           <label>Tolerância de etapa (dias)<input type="number" name="tolerancia_dias" min="0" value="${c.tolerancia_dias}"><div class="ajuda">Quantos dias depois do dia da etapa ela ainda pode ser enviada.</div></label>
-          <div class="aviso info pequeno">O Mac precisa estar ligado e com o Docker aberto no horário. Num servidor, isso roda sozinho 24h.</div>
+          <div class="aviso info pequeno">O envio roda sozinho no servidor, todo dia no horário escolhido, respeitando o limite e os intervalos acima.</div>
         </div>
         <div class="cartao pad" style="margin-bottom:14px">
           <h3>Após o pagamento</h3>
@@ -813,6 +887,7 @@ async function pgConfig(el) {
     </div></form>`;
   const f = $('#f-cfg');
   f.pix_tipo.value = c.pix_tipo;
+  abasConfig(el);
   let regua = JSON.parse(JSON.stringify(c.regua || []));
   let ultimoTexto = null;
   const desenharRegua = () => {
@@ -964,7 +1039,7 @@ async function pgUsuarios(el) {
   const perms = EU.lista_permissoes || {};
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Usuários</h1><div class="muted">Quem pode entrar no sistema e o que cada um pode fazer.</div></div>
-      <div class="acoes"><button class="btn primario" id="novo-usu">＋ Novo usuário</button></div></div>
+      <div class="acoes"><button class="btn primario" id="novo-usu">${ic('mais')} Novo usuário</button></div></div>
     <div class="cartao"><div class="tabela-wrap"><table>
       <thead><tr><th>Nome</th><th>Login</th><th>Permissões</th><th>Último acesso</th><th>Situação</th><th></th></tr></thead>
       <tbody>${lista.map((u) => `<tr>

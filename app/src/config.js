@@ -29,7 +29,7 @@ const PADRAO = {
     },
     {
       id: 'dia0', dias: 0, ativo: true,
-      modelo: 'Olá, {primeiro_nome}! Hoje ({vencimento}) vence o pagamento de {valor} ({descricao}) da {empresa}.\n\nSegue o Pix abaixo. Se já pagou, pode desconsiderar e mandar o comprovante por aqui. 🙏',
+      modelo: 'Olá, {primeiro_nome}! 📌 Hoje ({vencimento}) vence o pagamento de {valor} ({descricao}) da {empresa}.\n\nSegue o Pix abaixo. Se já pagou, pode desconsiderar e mandar o comprovante por aqui.',
     },
     {
       id: 'depois1', dias: 1, ativo: true,
@@ -52,14 +52,14 @@ const PADRAO = {
   agenda_lembrete: true,
   agenda_lembrete_horas: 3,
   agenda_msg_confirmacao: 'Olá, {primeiro_nome}! ✂️ Seu horário na {empresa} está marcado:\n\n📅 {dia_semana}, {data} às {hora}\n👤 {profissional}\n💈 {servico}\n\nPara confirmar responda *SIM*. Se precisar desmarcar, responda *CANCELAR*.',
-  agenda_msg_lembrete: 'Oi, {primeiro_nome}! Lembrete: hoje/amanhã você tem horário na {empresa} — {dia_semana}, {data} às {hora} com {profissional}.\n\nResponda *SIM* para confirmar ou *CANCELAR* se não puder vir.',
-  agenda_msg_confirmado: 'Confirmado, {primeiro_nome}! Te esperamos {dia_semana} às {hora}. 👍',
+  agenda_msg_lembrete: 'Oi, {primeiro_nome}! ⏰ Lembrete: hoje/amanhã você tem horário na {empresa} — {dia_semana}, {data} às {hora} com {profissional}.\n\nResponda *SIM* para confirmar ou *CANCELAR* se não puder vir.',
+  agenda_msg_confirmado: 'Confirmado, {primeiro_nome}! Te esperamos {dia_semana} às {hora}. ✅',
   agenda_msg_cancelado: 'Tudo bem, {primeiro_nome}. Seu horário de {data} às {hora} foi cancelado. Quando quiser remarcar, é só chamar aqui.',
 
   agradecer_pagamento: true,
-  modelo_agradecimento: 'Pagamento de {valor} recebido, {primeiro_nome}! Muito obrigado. 💙\n— {empresa}',
+  modelo_agradecimento: '✅ Pagamento de {valor} recebido, {primeiro_nome}! Muito obrigado.\n— {empresa}',
 
-  modelo_avulso: 'Olá, {primeiro_nome}! Segue o valor de {valor} referente a {descricao} na {empresa}.\n\nPode pagar pelo Pix abaixo e mandar o comprovante aqui. Obrigado! 🙏',
+  modelo_avulso: 'Olá, {primeiro_nome}! 🧾 Segue o valor de {valor} referente a {descricao} na {empresa}.\n\nPode pagar pelo Pix abaixo e mandar o comprovante aqui. Obrigado!',
 
   // retorno: chama de volta quem não aparece há um tempo
   retorno_ativo: false,
@@ -75,7 +75,7 @@ const PADRAO = {
   online_aviso: '',
 
   responder_comprovante: true,
-  modelo_resposta_comprovante: 'Recebemos seu comprovante, {primeiro_nome}! Vamos conferir e já damos baixa. Obrigado! 🙏',
+  modelo_resposta_comprovante: '📩 Recebemos seu comprovante, {primeiro_nome}! Vamos conferir e já damos baixa. Obrigado!',
 };
 
 let cache = null;

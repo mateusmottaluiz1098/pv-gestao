@@ -236,7 +236,7 @@ app.get('/api/painel', rota(async (req, res) => {
     q('SELECT COUNT(*)::int n FROM clientes WHERE ativo'),
     q("SELECT COUNT(*)::int n, COALESCE(SUM(valor),0) v FROM cobrancas WHERE status='aberto' AND vencimento=$1", [hoje]),
     q("SELECT COUNT(*)::int n, COALESCE(SUM(valor),0) v FROM cobrancas WHERE status='aberto' AND vencimento<$1", [hoje]),
-    q("SELECT COUNT(*)::int n, COALESCE(SUM(pago_valor),0) v FROM cobrancas WHERE status='pago' AND pago_em >= $1", [mes]),
+    q("SELECT COUNT(*)::int n, COALESCE(SUM(COALESCE(pago_valor, valor)),0) v FROM cobrancas WHERE status='pago' AND pago_em >= $1", [mes]),
     q("SELECT COUNT(*)::int n FROM comprovantes WHERE status='pendente'"),
     q("SELECT COUNT(*)::int n FROM mensagens WHERE direcao='saida' AND status='enviado' AND (criado_em AT TIME ZONE 'America/Sao_Paulo')::date=$1", [hoje]),
   ]);
@@ -252,7 +252,7 @@ app.get('/api/painel', rota(async (req, res) => {
     ativos: ativos.rows[0].n,
     vencem_hoje: vencemHoje.rows[0],
     atraso: atraso.rows[0],
-    recebido_mes: recebido.rows[0],
+    recebido_mes: { ...recebido.rows[0], ...(await FIN.recebidoNoPeriodo(mes, hoje)) },
     previsto_mes: previstoMes.rows[0].v,
     comprovantes_pendentes: comprov.rows[0].n,
     enviados_hoje: enviadosHoje.rows[0].n,
@@ -594,7 +594,12 @@ app.get('/api/exportar/cobrancas.csv', rota(async (req, res) => {
 }));
 app.get('/api/exportar/backup.json', pode('configuracoes'), rota(async (req, res) => {
   const tabelas = {};
-  for (const t of ['config', 'clientes', 'cobrancas', 'mensagens', 'consumos', 'produtos', 'vendas', 'caixa_movimentos']) tabelas[t] = (await q(`SELECT * FROM ${t}`)).rows;
+  for (const t of ['config', 'clientes', 'cobrancas', 'mensagens', 'consumos', 'produtos', 'vendas', 'caixa_movimentos',
+    'profissionais', 'servicos', 'agendamentos', 'retornos_enviados']) {
+    tabelas[t] = (await q(`SELECT * FROM ${t}`).catch(() => ({ rows: [] }))).rows;
+  }
+  // comprovantes sem o arquivo (imagem), para o backup não ficar enorme
+  tabelas.comprovantes = (await q('SELECT id, cliente_id, cobranca_id, telefone, nome_contato, mimetype, nome_arquivo, legenda, status, recebido_em, resolvido_em FROM comprovantes')).rows;
   res.setHeader('Content-Disposition', `attachment; filename="backup-cobrancas-${U.hoje()}.json"`);
   res.json({ versao: 1, gerado_em: new Date().toISOString(), ...tabelas });
 }));

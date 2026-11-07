@@ -27,7 +27,7 @@ async function iniciar() {
   try { S.info = await getJSON('/api/publico/agenda'); } catch (e) { $('#raiz').innerHTML = `<div class="aviso">${esc(e.message)}</div>`; return; }
   const i = S.info;
   aplicarMarca(i);
-  const topo = `<div class="ag-pub-topo"><span class="logo-marca">${i.tem_logo ? `<img src="/marca/logo?v=${i.logo_versao || ''}" alt="">` : '✂'}</span><div><h1>${esc(i.empresa || i.sistema_nome)}</h1><div class="muted pequeno">Agende seu horário</div></div></div>`;
+  const topo = `<div class="ag-pub-topo"><span class="logo-marca">${i.tem_logo ? `<img src="/marca/logo?v=${i.logo_versao || ''}" alt="">` : ic('tesoura')}</span><div><h1>${esc(i.empresa || i.sistema_nome)}</h1><div class="muted pequeno">Agende seu horário</div></div></div>`;
   if (!i.ativo) {
     $('#raiz').innerHTML = topo + '<div class="passo"><b>Agendamento online indisponível no momento.</b><p class="muted">Chame a gente no WhatsApp para marcar seu horário.</p></div>';
     return;
@@ -104,7 +104,7 @@ async function carregarHoras() {
     $$('[data-h]').forEach((x) => x.classList.toggle('sel', x === b));
     const slot = S.horarios.find((x) => x.hora === S.hora);
     const prof = S.info.profissionais.find((p) => p.id === (S.prof || slot.profissional_id));
-    $('#resumo').innerHTML = `✂ <b>${esc(S.servico.nome)}</b>${Number(S.servico.preco) ? ` · ${brl(S.servico.preco)}` : ''}<br>📅 ${esc(dataLonga(S.data))} às <b>${S.hora}</b><br>👤 ${esc(prof ? prof.nome : '')}`;
+    $('#resumo').innerHTML = `<div>${ic('tesoura')} <b>${esc(S.servico.nome)}</b>${Number(S.servico.preco) ? ` · ${brl(S.servico.preco)}` : ''}</div><div>${ic('agenda')} ${esc(dataLonga(S.data))} às <b>${S.hora}</b></div><div>${ic('usuario')} ${esc(prof ? prof.nome : '')}</div>`;
     $('#p4').classList.remove('inativo');
     $('#p4').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
@@ -121,7 +121,7 @@ async function enviar(e) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ servico_id: S.servico.id, profissional_id: S.prof || null, data: S.data, hora: S.hora, nome: f.nome.value, telefone: f.telefone.value, site: f.site.value }),
     });
-    $('#raiz').innerHTML = `<div class="passo ok-final"><div class="grande">✅</div><h2 style="justify-content:center">Horário marcado!</h2>
+    $('#raiz').innerHTML = `<div class="passo ok-final"><div class="grande">${ic('check')}</div><h2 style="justify-content:center">Horário marcado!</h2>
       <p><b>${esc(r.servico || '')}</b> com <b>${esc(r.profissional || '')}</b><br>${esc(dataLonga(r.data))} às <b>${esc(r.hora)}</b></p>
       <p class="muted">${r.whatsapp ? 'Mandamos a confirmação no seu WhatsApp. Se não puder vir, responda CANCELAR por lá.' : 'Até lá! Se não puder vir, avise a gente pelo WhatsApp.'}</p>
       <button class="btn" onclick="location.reload()">Marcar outro horário</button></div>`;

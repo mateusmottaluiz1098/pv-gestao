@@ -148,6 +148,16 @@ const dow = (d) => new Date(d + 'T12:00:00Z').getUTCDay();
   const agB2 = (await api('GET', `/api/agenda?de=${hoje}&ate=${hoje}`)).find((a) => a.id === a2.id);
   ok(agB2.pago === false, 'desfazer volta o atendimento para não pago');
 
+  console.log('11) REVISÃO: FIADO NO CAIXA, PAINEL E BACKUP');
+  const cxAntes = await api('GET', `/api/caixa?data=${hoje}`);
+  await api('POST', `/api/clientes/${av.id}/consumos`, { descricao: 'Barba', valor: '25', modo: 'agora' });
+  const cxDepois = await api('GET', `/api/caixa?data=${hoje}`);
+  ok(cxDepois.fiado.qtd === cxAntes.fiado.qtd && cxDepois.fiado.valor === cxAntes.fiado.valor, 'consumo cobrado na hora não conta como fiado no caixa', [cxAntes.fiado, cxDepois.fiado]);
+  const pn2 = await api('GET', '/api/painel');
+  ok(pn2.recebido_mes.atendimentos && pn2.recebido_mes.atendimentos.v > 0 && pn2.recebido_mes.vendas, 'painel: recebido no mês inclui atendimentos e produtos', pn2.recebido_mes);
+  const bk = await api('GET', '/api/exportar/backup.json');
+  ok(Array.isArray(bk.agendamentos) && bk.agendamentos.length > 0 && Array.isArray(bk.profissionais) && Array.isArray(bk.servicos) && Array.isArray(bk.comprovantes), 'backup inclui agenda, profissionais, serviços e comprovantes', Object.keys(bk));
+
   console.log(falhas ? `\nFALHAS: ${falhas}` : '\nTUDO OK');
   process.exit(falhas ? 1 : 0);
 })().catch((e) => { console.error('ERRO:', e.message); process.exit(2); });

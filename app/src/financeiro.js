@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS consumos (
   criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS consumos_cli_idx ON consumos (cliente_id, cobranca_id);
+ALTER TABLE consumos ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT 'pendurar';
 CREATE TABLE IF NOT EXISTS produtos (
   id SERIAL PRIMARY KEY,
   nome TEXT NOT NULL,
@@ -100,9 +101,9 @@ async function lancarConsumo(clienteId, { descricao, valor, data, modo, origem, 
     if (ja[0]) throw erro(400, 'Este atendimento já foi lançado na conta do cliente.');
   }
   const { rows } = await q(
-    `INSERT INTO consumos (cliente_id, data, descricao, valor, origem, agendamento_id, venda_id, criado_por)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [clienteId, dia, desc, v, origem || 'manual', agendamento_id || null, venda_id || null, por || null]
+    `INSERT INTO consumos (cliente_id, data, descricao, valor, origem, agendamento_id, venda_id, criado_por, modo)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [clienteId, dia, desc, v, origem || 'manual', agendamento_id || null, venda_id || null, por || null, modo === 'agora' ? 'agora' : 'pendurar']
   );
   const consumo = rows[0];
   if (modo === 'agora') {
@@ -284,7 +285,7 @@ async function caixaDoDia(data) {
   for (const r of comV) (comissoes[r.id] = comissoes[r.id] || { nome: r.nome, cor: r.cor, atendimentos: 0, servicos: 0, produtos: 0 }).produtos = Number(r.produtos);
   const listaCom = Object.values(comissoes).map((c) => ({ ...c, total: +(c.servicos + c.produtos).toFixed(2) }));
 
-  const { rows: fiado } = await q('SELECT COALESCE(SUM(valor), 0) AS v, COUNT(*)::int AS n FROM consumos WHERE data = $1', [data]);
+  const { rows: fiado } = await q("SELECT COALESCE(SUM(valor), 0) AS v, COUNT(*)::int AS n FROM consumos WHERE data = $1 AND modo = 'pendurar'", [data]);
 
   const porForma = {};
   for (const e of entradas) porForma[e.forma] = +((porForma[e.forma] || 0) + e.valor).toFixed(2);
@@ -375,4 +376,16 @@ function rotas(app, { rota, pode }) {
   app.delete('/api/caixa/movimentos/:id', pode('financeiro'), rota(async (req, res) => { await q('DELETE FROM caixa_movimentos WHERE id = $1', [req.params.id]); res.json({ ok: true }); }));
 }
 
-module.exports = { iniciar, rotas, lancarConsumo, pendurarAgendamento, registrarVenda, caixaDoDia, clientePorTelefone, FORMAS };
+// quanto entrou no período fora das cobranças (atendimentos pagos, produtos e entradas avulsas do caixa)
+async function recebidoNoPeriodo(de, ate) {
+  const [{ rows: a }, { rows: v }, { rows: m }] = await Promise.all([
+    q(`SELECT COUNT(*)::int n, COALESCE(SUM(valor), 0) v FROM agendamentos
+        WHERE pago AND COALESCE(forma_pagamento, '') <> 'fiado' AND status <> 'cancelado'
+          AND (COALESCE(pago_em, inicio) AT TIME ZONE '${TZ}')::date BETWEEN $1 AND $2`, [de, ate]),
+    q("SELECT COUNT(*)::int n, COALESCE(SUM(valor_total), 0) v FROM vendas WHERE forma_pagamento <> 'fiado' AND data BETWEEN $1 AND $2", [de, ate]),
+    q("SELECT COALESCE(SUM(valor), 0) v FROM caixa_movimentos WHERE tipo = 'entrada' AND data BETWEEN $1 AND $2", [de, ate]),
+  ]);
+  return { atendimentos: { n: a[0].n, v: Number(a[0].v) }, vendas: { n: v[0].n, v: Number(v[0].v) }, outros: Number(m[0].v) };
+}
+
+module.exports = { iniciar, rotas, lancarConsumo, pendurarAgendamento, registrarVenda, caixaDoDia, recebidoNoPeriodo, clientePorTelefone, FORMAS };

@@ -19,10 +19,10 @@ async function pgCaixa(el) {
     <div class="cabecalho">
       <div><h1>Caixa do dia</h1><div class="muted">${esc(dataExt)}${ehHoje ? ' · hoje' : ''}</div></div>
       <div class="acoes">
-        <button class="btn" id="cx-ant">←</button><input type="date" id="cx-data" value="${CX.data}" style="width:auto;margin:0"><button class="btn" id="cx-prox">→</button>
-        <button class="btn" id="cx-prod">Produtos</button>
-        <button class="btn" id="cx-mov">＋ Despesa / retirada</button>
-        <button class="btn primario" id="cx-venda">＋ Vender produto</button>
+        <button class="btn" id="cx-ant" aria-label="Dia anterior">${ic('esquerda')}</button><input type="date" id="cx-data" value="${CX.data}" style="width:auto;margin:0"><button class="btn" id="cx-prox" aria-label="Próximo dia">${ic('direita')}</button>
+        <button class="btn" id="cx-prod">${ic('produtos')} Produtos</button>
+        <button class="btn" id="cx-mov">${ic('mais')} Despesa / retirada</button>
+        <button class="btn primario" id="cx-venda">${ic('mais')} Vender produto</button>
       </div>
     </div>
     <div class="grade g4">
@@ -31,31 +31,31 @@ async function pgCaixa(el) {
       <div class="cartao kpi alerta"><div class="rotulo">Comissões do dia</div><div class="valor">${brl(t.comissoes)}</div><div class="det">despesas/retiradas: ${brl(t.saidas)}</div></div>
       <div class="cartao kpi"><div class="rotulo">Fica para a casa</div><div class="valor">${brl(t.resultado)}</div><div class="det">entradas − saídas − comissões</div></div>
     </div>
-    ${r.fiado.qtd ? `<div class="aviso" style="margin-top:14px">📝 ${r.fiado.qtd} consumo(s) pendurado(s) no fiado hoje, total <b>${brl(r.fiado.valor)}</b>. Entra no caixa quando o cliente pagar a cobrança.</div>` : ''}
+    ${r.fiado.qtd ? `<div class="aviso" style="margin-top:14px">${ic('cobrancas')} ${r.fiado.qtd} consumo(s) pendurado(s) no fiado hoje, total <b>${brl(r.fiado.valor)}</b>. Entra no caixa quando o cliente pagar a cobrança.</div>` : ''}
     <div class="grade g2" style="margin-top:14px">
       <div class="cartao">
         <div class="cartao-topo"><h2>Por forma de pagamento</h2></div>
         ${formas.length ? formas.map(([f, v]) => `<div class="lista-item"><div class="cresce"><b>${esc(NOME_PAGTO[f] || f)}</b></div><div class="num"><b>${brl(v)}</b></div></div>`).join('') : '<div class="vazio" style="padding:18px">Nada recebido neste dia.</div>'}
       </div>
       <div class="cartao">
-        <div class="cartao-topo"><h2>Comissões por profissional</h2><a class="btn mini" href="#/comissoes">Relatório →</a></div>
+        <div class="cartao-topo"><h2>Comissões por profissional</h2><a class="btn mini" href="#/comissoes">${ic('grafico')} Relatório</a></div>
         ${r.comissoes.length ? r.comissoes.map((c) => `<div class="lista-item"><span class="ag-ponto" style="background:${esc(c.cor)}"></span><div class="cresce"><b>${esc(c.nome)}</b><div class="muted pequeno">${c.atendimentos} atendimento(s)${c.produtos ? ` · produtos ${brl(c.produtos)}` : ''}</div></div><div class="num"><b>${brl(c.total)}</b></div></div>`).join('') : '<div class="vazio" style="padding:18px">Nenhum atendimento concluído neste dia.</div>'}
       </div>
     </div>
     <div class="cartao" style="margin-top:14px">
-      <div class="cartao-topo"><h2>Entradas</h2><button class="btn mini" id="cx-imprimir">Imprimir fechamento</button></div>
+      <div class="cartao-topo"><h2>Entradas</h2><button class="btn mini" id="cx-imprimir">${ic('imprimir')} Imprimir fechamento</button></div>
       <div class="tabela-wrap"><table><thead><tr><th>Hora</th><th>Origem</th><th>Descrição</th><th>Cliente</th><th>Forma</th><th class="num">Valor</th><th></th></tr></thead><tbody>
       ${r.entradas.length ? r.entradas.map((e) => `<tr><td>${esc(e.hora || '—')}</td><td><span class="tag">${NOME_ORIGEM[e.origem] || e.origem}</span></td>
         <td>${esc(e.descricao)}${e.profissional ? `<div class="sub2">${esc(e.profissional)}</div>` : ''}</td><td>${esc(e.cliente || '')}</td>
         <td>${esc(NOME_PAGTO[e.forma] || e.forma)}</td><td class="num"><b>${brl(e.valor)}</b></td>
-        <td class="num">${e.origem === 'venda' ? `<button class="btn mini" data-del-venda="${e.id}" title="Estornar venda">✕</button>` : e.origem === 'manual' ? `<button class="btn mini" data-del-mov="${e.id}" title="Excluir">✕</button>` : ''}</td></tr>`).join('')
+        <td class="num">${e.origem === 'venda' ? `<button class="btn mini" data-del-venda="${e.id}" title="Estornar venda" aria-label="Estornar venda">${ic('lixo')}</button>` : e.origem === 'manual' ? `<button class="btn mini" data-del-mov="${e.id}" title="Excluir lançamento" aria-label="Excluir lançamento">${ic('lixo')}</button>` : ''}</td></tr>`).join('')
         : '<tr><td colspan="7" class="vazio"><b>Nenhuma entrada</b>Atendimentos pagos na agenda, cobranças pagas e produtos vendidos aparecem aqui.</td></tr>'}
       </tbody></table></div>
     </div>
     ${r.saidas.length ? `<div class="cartao" style="margin-top:14px"><div class="cartao-topo"><h2>Saídas (despesas e retiradas)</h2></div>
       <div class="tabela-wrap"><table><thead><tr><th>Hora</th><th>Descrição</th><th>Forma</th><th>Lançado por</th><th class="num">Valor</th><th></th></tr></thead><tbody>
       ${r.saidas.map((e) => `<tr><td>${esc(e.hora)}</td><td>${esc(e.descricao)}</td><td>${esc(NOME_PAGTO[e.forma] || e.forma)}</td><td class="pequeno muted">${esc(e.por || '')}</td><td class="num"><b>${brl(e.valor)}</b></td>
-        <td class="num"><button class="btn mini" data-del-mov="${e.id}" title="Excluir">✕</button></td></tr>`).join('')}
+        <td class="num"><button class="btn mini" data-del-mov="${e.id}" title="Excluir lançamento" aria-label="Excluir lançamento">${ic('lixo')}</button></td></tr>`).join('')}
       </tbody></table></div></div>` : ''}
     <p class="muted pequeno" style="margin-top:10px">Atendimento entra no caixa quando é marcado como pago na agenda. Fiado entra só quando a cobrança é paga. Comissões contam os atendimentos concluídos e os produtos vendidos no dia.</p>`;
 
@@ -170,7 +170,7 @@ async function modalProdutos(depoisVender) {
         <p class="erro-txt" id="pr-erro"></p>
       </form>
     </div>
-    <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button>${depoisVender ? '<button class="btn primario" id="pr-vender">Ir para a venda →</button>' : ''}</div>`, true);
+    <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button>${depoisVender ? `<button class="btn primario" id="pr-vender">Ir para a venda ${ic('direita')}</button>` : ''}</div>`, true);
   $$('[data-fechar]').forEach((b) => b.addEventListener('click', () => { if (location.hash.includes('caixa')) rotear(); }));
   const pv = $('#pr-vender'); if (pv) pv.onclick = () => modalVenda(() => rotear());
   const f = $('#f-pr');

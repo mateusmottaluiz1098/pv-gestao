@@ -36,27 +36,27 @@ async function pgAgenda(el) {
         <a class="btn" id="ag-com" href="#/comissoes">Comissões</a>
         <button class="btn" id="ag-prof">Profissionais</button>
         <button class="btn" id="ag-serv">Serviços</button>
-        <button class="btn" id="ag-cheia" title="Esconder o menu e usar a tela toda">⛶ <span>Tela cheia</span></button>
-        <button class="btn primario" id="ag-novo">＋ Agendar</button>
+        <button class="btn" id="ag-cheia" title="Esconder o menu e usar a tela toda">${ic('expandir')} <span>Tela cheia</span></button>
+        <button class="btn primario" id="ag-novo">${ic('mais')} Agendar</button>
       </div>
     </div>
     ${!ativos.length ? `<div class="cartao vazio"><b>Cadastre os profissionais para começar</b>Cada profissional vira uma coluna na agenda, com o próprio horário de trabalho.<br><br>
       ${pode('agenda_config') ? '<button class="btn primario" id="ag-prof2">Cadastrar profissionais</button>' : 'Peça ao administrador para cadastrar.'}</div>` : `
     <div class="ag-mobbar">
-      <button class="agm-ic" id="agm-menu" aria-label="Menu">☰</button>
+      <button class="agm-ic" id="agm-menu" aria-label="Menu">${ic('menu')}</button>
       <label class="agm-mes"><span id="agm-mes"></span> ▾<input type="date" id="agm-data" value="${AG.data}" aria-label="Escolher data"></label>
       <span class="agm-esp"></span>
       <select id="agm-vista" aria-label="Visão"><option value="dia">Dia</option><option value="3dias">3 dias</option><option value="semana">Semana</option></select>
       <button class="agm-hoje" id="agm-hoje" aria-label="Hoje">${Number(hojeLocal().slice(8))}</button>
-      <button class="agm-ic" id="agm-mais" aria-label="Mais opções">⋮</button>
+      <button class="agm-ic" id="agm-mais" aria-label="Mais opções">${ic('opcoes')}</button>
     </div>
-    <button class="ag-fab" id="ag-fab" aria-label="Agendar">＋</button>
+    <button class="ag-fab" id="ag-fab" aria-label="Agendar">${ic('mais')}</button>
     <div class="cartao ag-cartao">
       <div class="cartao-topo">
         <div class="filtros">
-          <button class="btn" id="ag-ant" aria-label="Anterior">←</button>
+          <button class="btn" id="ag-ant" aria-label="Anterior">${ic('esquerda')}</button>
           <button class="btn" id="ag-hoje">Hoje</button>
-          <button class="btn" id="ag-prox" aria-label="Próximo">→</button>
+          <button class="btn" id="ag-prox" aria-label="Próximo">${ic('direita')}</button>
           <input type="date" id="ag-data" value="${AG.data}">
         </div>
         <div class="filtros">
@@ -236,7 +236,7 @@ async function desenharAgenda(rolar) {
       const dica = `${a.inicio_local.slice(11)} ${a.cliente_nome || ''}${a.servico_nome ? ' · ' + a.servico_nome : ''}${c.todos ? ' · ' + (a.profissional_nome || '') : ''}`;
       return `<div class="ag-ev st-${a.status} ${a.pago ? 'pago' : ''} ${cols > 1 ? 'estreito' : ''}" data-ag="${a.id}" title="${esc(dica)}"
         style="top:${(t - ini) * PX_MIN}px;height:${h}px;left:calc(${(col / cols) * 100}% + 1px);width:calc(${100 / cols}% - 2px);--cor:${esc(a.cor)}">
-        <div class="ag-ev-l1"><b class="ev-h">${a.inicio_local.slice(11)}</b> <span class="ev-n">${esc(a.status === 'bloqueio' ? '🔒 ' + (a.cliente_nome || 'Bloqueado') : a.cliente_nome || '')}</span>${a.status === 'confirmado' ? ' ✓' : ''}${a.pago ? ' 💲' : ''}</div>
+        <div class="ag-ev-l1"><b class="ev-h">${a.inicio_local.slice(11)}</b> <span class="ev-n">${a.status === 'bloqueio' ? ic('cadeado', 'ic-in') + ' ' + esc(a.cliente_nome || 'Bloqueado') : esc(a.cliente_nome || '')}</span>${a.status === 'confirmado' ? ic('check', 'ic-in') : ''}${a.pago ? '<span class="ev-pago" title="Pago">$</span>' : ''}</div>
         ${curto ? '' : `<div class="ag-ev-l2">${c.todos ? `<b>${esc(a.profissional_nome || '')}</b> · ` : ''}${esc(a.servico_nome || '')}${a.status !== 'agendado' && a.status !== 'confirmado' && a.status !== 'bloqueio' ? ` · ${NOME_STATUS[a.status]}` : ''}</div>`}
       </div>`;
     }).join('');
@@ -377,7 +377,7 @@ function modalAgendamento(a, padrao = {}) {
     </div>
     <div class="modal-rodape" style="flex-wrap:wrap">
       ${!novo ? `<div class="acoes" style="margin-right:auto">
-        ${!bloq && !['concluido', 'cancelado'].includes(v.status) ? '<button type="button" class="btn mini verde ag-acao" data-st="concluido">✓ Concluído</button>' : ''}
+        ${!bloq && !['concluido', 'cancelado'].includes(v.status) ? `<button type="button" class="btn mini verde ag-acao" data-st="concluido">${ic('check')} Concluído</button>` : ''}
         ${!bloq && ['agendado', 'confirmado'].includes(v.status) ? '<button type="button" class="btn mini ag-acao" data-st="faltou">Faltou</button><button type="button" class="btn mini ag-acao" data-st="cancelado">Cancelar horário</button>' : ''}
         ${!bloq && v.telefone ? '<button type="button" class="btn mini btn-wa ag-acao" id="ag-wa">WhatsApp</button>' : ''}
         <button type="button" class="btn mini perigo ag-acao" id="ag-excluir">Excluir</button>
@@ -519,7 +519,7 @@ async function modalProfissionais(editarId) {
       <div class="modal-corpo">${AG.profs.length ? AG.profs.map((x) => `<div class="lista-item"><span class="ag-ponto" style="background:${esc(x.cor)}"></span>
         <div class="cresce"><b>${esc(x.nome)}</b> <span class="tag">${Number(x.comissao_pct || 0)}%</span> ${x.ativo ? '' : '<span class="tag">Inativo</span>'}<div class="muted pequeno">${(x.expediente.dias || []).map((d) => DIAS_CURTO[d]).join(', ')} · ${x.expediente.inicio}–${x.expediente.fim}${x.expediente.almoco_inicio ? ` · almoço ${x.expediente.almoco_inicio}–${x.expediente.almoco_fim}` : ''}</div></div>
         <button class="btn mini" data-pe="${x.id}">Editar</button></div>`).join('') : '<p class="muted">Nenhum profissional cadastrado.</p>'}</div>
-      <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario" id="pe-novo">＋ Novo profissional</button></div>`);
+      <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario" id="pe-novo">${ic('mais')} Novo profissional</button></div>`);
     $('#pe-novo').onclick = () => modalProfissionais('novo');
     $$('[data-pe]').forEach((b) => b.onclick = () => modalProfissionais(Number(b.dataset.pe)));
     $$('[data-fechar]').forEach((b) => b.addEventListener('click', () => { if (location.hash.includes('agenda')) rotear(); }));
@@ -624,7 +624,7 @@ async function pgComissoes(el) {
   const periodos = [['hoje', 'Hoje'], ['ontem', 'Ontem'], ['semana', 'Esta semana'], ['semana_ant', 'Semana passada'], ['mes', 'Este mês'], ['mes_ant', 'Mês passado'], ['outro', 'Outro período']];
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Comissões</h1><div class="muted">Atendimentos concluídos e quanto cada profissional ganha · ${de === ate ? brData(de) : `${brData(de)} a ${brData(ate)}`}</div></div>
-      <div class="acoes"><a class="btn" href="#/agenda">← Agenda</a><button class="btn" id="com-csv">↓ Exportar CSV</button><button class="btn" id="com-imprimir">Imprimir</button></div></div>
+      <div class="acoes"><a class="btn" href="#/agenda">${ic('esquerda')} Agenda</a><button class="btn" id="com-csv">${ic('baixar')} Exportar CSV</button><button class="btn" id="com-imprimir">${ic('imprimir')} Imprimir</button></div></div>
     <div class="cartao" style="margin-bottom:14px"><div class="cartao-topo">
       <div class="seg" id="com-per">${periodos.map(([k, n]) => `<button data-p="${k}" class="${COM.periodo === k ? 'sel' : ''}">${n}</button>`).join('')}</div>
       <div class="filtros ${COM.periodo === 'outro' ? '' : 'hidden'}" id="com-datas"><input type="date" id="com-de" value="${de}"> até <input type="date" id="com-ate" value="${ate}"><button class="btn primario" id="com-ok">Ver</button></div>
@@ -645,7 +645,7 @@ async function pgComissoes(el) {
           <td class="num">${p.itens.length ? `<button class="btn mini" data-det="${p.profissional_id}">${COM.aberto[p.profissional_id] ? 'Ocultar' : 'Detalhes'}</button>` : ''}</td></tr>
         ${COM.aberto[p.profissional_id] ? `<tr><td colspan="8" style="background:#fafcfd;padding:0"><table style="font-size:12.5px">
           <thead><tr><th>Data</th><th>Cliente</th><th>Serviço / produto</th><th class="num">Valor</th><th class="num">%</th><th class="num">Comissão</th><th>Pagamento</th></tr></thead><tbody>
-          ${p.itens.map((i) => `<tr><td>${brData(i.inicio.slice(0, 10))} ${i.produto ? '' : i.inicio.slice(11)}</td><td>${esc(i.cliente || '')}</td><td>${i.produto ? '🧴 ' : ''}${esc(i.servico || '—')}</td>
+          ${p.itens.map((i) => `<tr><td>${brData(i.inicio.slice(0, 10))} ${i.produto ? '' : i.inicio.slice(11)}</td><td>${esc(i.cliente || '')}</td><td>${i.produto ? ic('produtos', 'ic-in') + ' ' : ''}${esc(i.servico || '—')}</td>
             <td class="num">${brl(i.valor)}</td><td class="num">${i.pct}%</td><td class="num">${brl(i.comissao)}</td>
             <td>${i.pago ? `<span class="tag pago">${esc({ pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Crédito', debito: 'Débito', fiado: 'Fiado pago' }[i.forma] || 'Pago')}</span>` : i.forma === 'fiado' ? '<span class="tag hoje">Fiado</span>' : '<span class="tag hoje">Não pago</span>'}</td></tr>`).join('')}
           </tbody></table></td></tr>` : ''}`).join('')
