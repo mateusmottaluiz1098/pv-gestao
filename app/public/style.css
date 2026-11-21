@@ -200,11 +200,17 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(var(--sombra
 .aviso.info { background: var(--azul-claro); color: var(--azul-1); }
 .aviso.ok { background: var(--verde-claro); color: #0c6542; }
 
-/* Comprovantes */
-.comp-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
-.comp-img { height: 260px; background: #eef3f6; display: grid; place-items: center; overflow: hidden; border-radius: var(--raio) var(--raio) 0 0; cursor: zoom-in; }
-.comp-img img { width: 100%; height: 100%; object-fit: contain; }
+/* Comprovantes (PDF) */
+.comp-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; align-items: start; }
+.comp-pdf { display: flex; align-items: center; gap: 12px; padding: 14px; border-bottom: 1px solid var(--borda); background: #f8fafc; border-radius: var(--raio) var(--raio) 0 0; cursor: pointer; }
+.comp-pdf:hover { background: var(--azul-claro); }
+.comp-pdf.sem { cursor: default; opacity: .7; }
+.comp-pdf .cresce { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.comp-pdf small { color: var(--muted); font-size: 12px; }
+.comp-pdf > .ic { color: var(--muted); }
+.comp-pdf-ic { flex-shrink: 0; width: 42px; height: 50px; border-radius: 7px; background: var(--vermelho-claro); color: var(--vermelho); font-size: 11px; font-weight: 800; letter-spacing: .04em; display: grid; place-items: center; border: 1px solid #f6cfcb; }
 .comp-corpo { padding: 14px; }
+.nw { white-space: nowrap; }
 
 /* WhatsApp */
 .qr { width: 280px; height: 280px; border: 1px solid var(--borda); border-radius: 12px; display: grid; place-items: center; background: #fff; margin: 10px 0; }
@@ -288,6 +294,15 @@ a.btn { text-decoration: none; }
   .topo { padding: 12px 16px; }
   .linha, .linha3 { grid-template-columns: 1fr; }
   #topo-data { display: none; }
+  /* valores grandes não estouram o cartão em duas colunas */
+  .kpi { padding: 14px; }
+  .kpi .valor { font-size: clamp(18px, 5.6vw, 24px); overflow-wrap: anywhere; }
+  /* fila de hoje: botão vai para a linha de baixo */
+  #fila-lista .lista-item { flex-wrap: wrap; }
+  #fila-lista .lista-item .cresce { flex-basis: 100%; }
+  #fila-lista .lista-item .num { margin-right: auto; }
+  /* salvar sempre à mão nas telas longas */
+  body[data-pg="config"] #salvar-cfg, body[data-pg="personalizacao"] #salvar-marca { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 30; padding: 12px 18px; box-shadow: 0 6px 20px rgba(var(--sombra-cor), .45); }
   /* tabelas viram cartões no celular */
   #com-per { display: flex; flex-wrap: wrap; width: 100%; }
   #com-per button { flex: 1 1 30%; white-space: nowrap; padding: 8px 6px; }
@@ -350,7 +365,8 @@ body[data-pg="agenda"] .ag-resumo { padding: 7px 14px; }
 .ag-ev.st-cancelado { opacity: .45; text-decoration: line-through; background: #f2f4f6; border-left-color: #b8c4ce; }
 .ag-ev.st-bloqueio { background: repeating-linear-gradient(135deg, #e9edf1, #e9edf1 5px, #f3f5f7 5px, #f3f5f7 10px); border-left-color: #8798a6; color: #4c6070; }
 .ag-agora { position: absolute; left: 0; right: 0; height: 2px; background: var(--vermelho); z-index: 2; pointer-events: none; }
-.ag-agora::before { content: ''; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--vermelho); }
+.ag-agora::before { content: ''; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--vermelho); display: none; }
+.ag-regua + .ag-col .ag-agora::before { display: block; } /* bolinha só no começo da linha, não em cada coluna */
 .ag-ponto { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; flex-shrink: 0; }
 .tag.st-tag-confirmado, .tag.st-tag-concluido { background: var(--verde-claro); color: var(--verde); }
 .tag.st-tag-faltou, .tag.st-tag-cancelado { background: var(--vermelho-claro); color: var(--vermelho); }

@@ -9,7 +9,9 @@ const brDataHora = (s) => s ? new Date(s).toLocaleString('pt-BR', { day: '2-digi
 const fone = (t) => { const d = String(t || '').replace(/\D/g, '').replace(/^55/, ''); return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d.length === 10 ? `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}` : t; };
 const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
-let HOJE = new Date().toISOString().slice(0, 10);
+// data de hoje no fuso do navegador (toISOString usa UTC e, depois das 21h, já dava o dia seguinte)
+const dataLocal = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+let HOJE = dataLocal();
 let CONFIG = null;
 
 async function api(caminho, opcoes = {}) {
@@ -22,6 +24,15 @@ async function api(caminho, opcoes = {}) {
   const dados = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(dados.erro || 'Erro ' + r.status);
   return dados;
+}
+
+// copia texto mesmo quando o navegador bloqueia a área de transferência (página sem HTTPS válido)
+async function copiarTexto(txt) {
+  try { await navigator.clipboard.writeText(txt); return true; } catch (e) { /* tenta o jeito antigo */ }
+  const t = document.createElement('textarea'); t.value = txt; t.style.cssText = 'position:fixed;opacity:0';
+  document.body.appendChild(t); t.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  t.remove(); return ok;
 }
 
 function toast(msg, erro = false) {
@@ -344,7 +355,7 @@ async function pgPainel(el) {
       <div class="cartao">
         <div class="cartao-topo"><div><h2>Envio automático</h2><div class="muted pequeno">${d.automatico ? `Ligado · todos os dias às ${esc(d.hora_envio)}` : 'Desligado'}</div></div>
           <span class="tag ${d.automatico ? 'enviado' : ''}">${d.automatico ? 'Ativo' : 'Inativo'}</span></div>
-        <div class="cartao pad" style="border:0;box-shadow:none">
+        <div style="padding:14px 18px">
           ${d.automatico ? `<p class="muted pequeno">Última execução automática: ${d.ultima_execucao ? brData(d.ultima_execucao) : 'ainda não rodou'}.</p>` : '<p class="muted pequeno">Ligue em Configurações para o sistema enviar a régua sozinho todos os dias.</p>'}
         </div>
       </div>
@@ -437,7 +448,7 @@ async function pgClientes(el) {
       const prox = c.proxima ? `${brData(c.proxima.vencimento)}${c.proxima.numero_parcela ? ` · ${c.proxima.numero_parcela}/${c.parcelas_total}` : ''}${Number(c.proxima.valor) !== Number(c.valor) ? `<div class="sub2">${brl(c.proxima.valor)}</div>` : ''}` : '—';
       return `<tr>
         <td><a href="#" data-ver="${c.id}"><b>${esc(c.nome)}</b></a><div class="sub2">${esc(c.identificacao || '')}</div></td>
-        <td>${fone(c.telefone)}</td>
+        <td class="nw">${fone(c.telefone)}</td>
         <td class="num">${c.forma === 'avulso' ? '—' : brl(c.valor)}</td>
         <td>${esc(formaCliente(c))}${Number(c.fiado_pendente) ? `<div class="sub2"><span class="tag hoje">fiado ${brl(c.fiado_pendente)}</span></div>` : ''}</td>
         <td>${prox}</td>
@@ -604,11 +615,14 @@ function acoesCobranca(cb) {
 function ligarAcoesCobranca(raiz, recarregar) {
   $$('[data-pagar]', raiz).forEach((b) => b.onclick = () => modalPagar(b.dataset.pagar, b.dataset.valor, recarregar));
   $$('[data-desfazer]', raiz).forEach((b) => b.onclick = async () => {
-    await api(`/cobrancas/${b.dataset.desfazer}/desfazer`, { method: 'POST' }); toast('Pagamento desfeito'); recarregar();
+    if (!(await confirmar('Desfazer pagamento?', 'A cobrança volta a ficar em aberto e pode entrar de novo na régua de avisos.', 'Desfazer', true))) return recarregar();
+    try { await api(`/cobrancas/${b.dataset.desfazer}/desfazer`, { method: 'POST' }); toast('Pagamento desfeito'); } catch (e) { toast(e.message, true); }
+    recarregar();
   });
   $$('[data-cancelar]', raiz).forEach((b) => b.onclick = async () => {
-    if (!(await confirmar('Cancelar cobrança?', 'Esta cobrança não será mais enviada nem contada como pendente.', 'Cancelar cobrança', true))) return;
-    await api(`/cobrancas/${b.dataset.cancelar}/cancelar`, { method: 'POST' }); toast('Cobrança cancelada'); recarregar();
+    if (!(await confirmar('Cancelar cobrança?', 'Esta cobrança não será mais enviada nem contada como pendente.', 'Cancelar cobrança', true))) return recarregar();
+    try { await api(`/cobrancas/${b.dataset.cancelar}/cancelar`, { method: 'POST' }); toast('Cobrança cancelada'); } catch (e) { toast(e.message, true); }
+    recarregar();
   });
   $$('[data-previa-cob]', raiz).forEach((b) => b.onclick = () => modalPrevia(b.dataset.previaCob));
   $$('[data-pix]', raiz).forEach((b) => b.onclick = async () => {
@@ -617,7 +631,7 @@ function ligarAcoesCobranca(raiz, recarregar) {
       abrirModal(`<div class="modal-topo"><h2>Pix · ${esc(p.cliente)}</h2><button class="fechar" data-fechar>×</button></div>
         <div class="modal-corpo" style="text-align:center"><img src="${p.qr}" style="width:240px;height:240px"><div class="codigo" style="text-align:left">${esc(p.codigo)}</div></div>
         <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario" id="copiar-pix">Copiar código</button></div>`);
-      $('#copiar-pix').onclick = () => { navigator.clipboard.writeText(p.codigo); toast('Código copiado ✓'); };
+      $('#copiar-pix').onclick = async () => { (await copiarTexto(p.codigo)) ? toast('Código copiado ✓') : toast('Não consegui copiar. Selecione o código e copie.', true); };
     } catch (e) { toast(e.message, true); }
   });
 }
@@ -647,7 +661,7 @@ function modalPagar(id, valor, aoSalvar) {
 let mesCob = null;
 let filtroCob = '';
 async function pgCobrancas(el) {
-  mesCob = mesCob || new Date().toISOString().slice(0, 7);
+  mesCob = mesCob || dataLocal().slice(0, 7);
   const d = await api(`/cobrancas?mes=${mesCob}`);
   HOJE = d.hoje;
   const [y, m] = d.mes.split('-').map(Number);
@@ -711,7 +725,10 @@ async function pgComprovantes(el) {
       <div class="acoes"><select id="f-comp" style="width:auto;margin:0"><option value="pendente">Para conferir</option><option value="aceito">Confirmados</option><option value="recusado">Recusados</option></select></div></div>
     ${lista.length ? `<div class="comp-grade">${lista.map((cp) => `
       <div class="cartao">
-        <div class="comp-img" data-abrir="${cp.id}">${!cp.tem_arquivo ? '<span class="muted">Arquivo indisponível</span>' : cp.mimetype && cp.mimetype.startsWith('image/') ? `<img src="/api/comprovantes/${cp.id}/arquivo" loading="lazy">` : `<span style="font-size:40px">📄</span>`}</div>
+        <div class="comp-pdf ${cp.tem_arquivo ? '' : 'sem'}" ${cp.tem_arquivo ? `data-abrir="${cp.id}" title="Abrir o PDF"` : ''}>
+          <span class="comp-pdf-ic">PDF</span>
+          <span class="cresce"><b class="trunca">${esc(cp.nome_arquivo || 'comprovante.pdf')}</b><small>${cp.tem_arquivo ? 'Clique para abrir e conferir' : 'Arquivo indisponível'}</small></span>
+          ${cp.tem_arquivo ? ic('direita') : ''}</div>
         <div class="comp-corpo">
           <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(cp.nome || cp.nome_contato || fone(cp.telefone))}</b><span class="muted pequeno">${brDataHora(cp.recebido_em)}</span></div>
           ${cp.legenda ? `<div class="muted pequeno" style="margin-top:4px">“${esc(cp.legenda)}”</div>` : ''}
@@ -928,7 +945,7 @@ async function pgConfig(el) {
           <label>Mensagem<textarea name="modelo_agradecimento" style="min-height:80px">${esc(c.modelo_agradecimento)}</textarea></label>
         </div>
         <div class="cartao pad">
-          <h3>Quando o cliente mandar comprovante</h3>
+          <h3>Quando o cliente mandar comprovante (PDF)</h3>
           <label class="check"><input type="checkbox" name="responder_comprovante" ${c.responder_comprovante ? 'checked' : ''}> Responder automaticamente</label>
           <label>Mensagem<textarea name="modelo_resposta_comprovante" style="min-height:80px">${esc(c.modelo_resposta_comprovante)}</textarea></label>
         </div>
@@ -1056,7 +1073,7 @@ async function pgConfig(el) {
     } catch (e) { toast(e.message, true); throw e; }
   };
   $('#salvar-cfg').onclick = () => salvarCfg(false);
-  $('#copiar-link').onclick = () => { navigator.clipboard.writeText(location.origin + '/agendar'); toast('Link copiado ✓'); };
+  $('#copiar-link').onclick = async () => { (await copiarTexto(location.origin + '/agendar')) ? toast('Link copiado ✓') : toast('Não consegui copiar o link.', true); };
   api('/retorno/previa').then((r) => {
     const box = $('#retorno-info');
     if (box) box.innerHTML = `Hoje ${r.candidatos} cliente(s) se encaixam · ${r.enviados_30d} chamado(s) nos últimos 30 dias.<div class="previa" style="margin-top:6px">${esc(r.exemplo)}</div>`;

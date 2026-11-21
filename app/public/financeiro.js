@@ -73,7 +73,8 @@ async function pgCaixa(el) {
   });
   $$('[data-del-mov]').forEach((b) => b.onclick = async () => {
     if (!(await confirmar('Excluir lançamento?', 'Ele sai do caixa deste dia.', 'Excluir', true))) return;
-    await api(`/caixa/movimentos/${b.dataset.delMov}`, { method: 'DELETE' }); toast('Excluído'); rotear();
+    try { await api(`/caixa/movimentos/${b.dataset.delMov}`, { method: 'DELETE' }); toast('Excluído'); } catch (e) { toast(e.message, true); }
+    rotear();
   });
 }
 
