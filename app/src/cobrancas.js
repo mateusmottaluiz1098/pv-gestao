@@ -193,7 +193,7 @@ async function pixDaCobranca(cobranca, cliente) {
   }
   if (cliente && cobranca.status !== 'pago' && cobranca.status !== 'cancelado') {
     const ASAAS = require('./asaas');
-    const u = await ASAAS.usaAsaas(cliente);
+    const u = await ASAAS.usaAsaas(cliente, cobranca);
     if (u.usa) {
       try {
         const p = await ASAAS.pixDaCobranca(cobranca, cliente, u.ci);

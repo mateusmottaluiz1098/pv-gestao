@@ -21,6 +21,8 @@ ALTER TABLE cobrancas ADD COLUMN IF NOT EXISTS asaas_link TEXT;
 ALTER TABLE cobrancas ADD COLUMN IF NOT EXISTS asaas_pix TEXT;
 ALTER TABLE cobrancas ADD COLUMN IF NOT EXISTS asaas_erro TEXT;
 ALTER TABLE cobrancas ADD COLUMN IF NOT EXISTS asaas_conferido_em TIMESTAMPTZ;
+-- forma do Pix escolhida só para esta cobrança: NULL = segue o cliente, 'asaas' ou 'direto'
+ALTER TABLE cobrancas ADD COLUMN IF NOT EXISTS pix_modo TEXT;
 CREATE INDEX IF NOT EXISTS cobrancas_asaas_idx ON cobrancas (asaas_id) WHERE asaas_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS asaas_eventos (
@@ -153,11 +155,17 @@ async function garantirCliente(cliente, ci) {
 }
 
 // ---------- Cobrança (Pix) no Asaas ----------
-// usa Asaas para este cliente? (devolve o motivo quando não)
-async function usaAsaas(cliente) {
+// forma do Pix valendo para a cobrança: a escolhida nela ou, se não tiver, a do cliente
+function modoEfetivo(cliente, cobranca) {
+  if (cobranca && (cobranca.pix_modo === 'asaas' || cobranca.pix_modo === 'direto')) return cobranca.pix_modo;
+  return cliente && cliente.pix_asaas === false ? 'direto' : 'asaas';
+}
+
+// usa Asaas para esta cobrança? (devolve o motivo quando não)
+async function usaAsaas(cliente, cobranca) {
   const ci = await conta();
   if (!ci.ligado) return { usa: false, ci };
-  if (cliente.pix_asaas === false) return { usa: false, ci };
+  if (modoEfetivo(cliente, cobranca) === 'direto') return { usa: false, ci };
   if (!docValido(cliente.cpf_cnpj)) return { usa: false, ci, motivo: 'Sem CPF/CNPJ: foi o Pix direto' };
   return { usa: true, ci };
 }
@@ -212,6 +220,34 @@ async function pixDaCobranca(cb, cliente, ci) {
 
 async function registrarErro(cobrancaId, msg) {
   await q('UPDATE cobrancas SET asaas_erro=$1 WHERE id=$2', [String(msg || '').slice(0, 300) || null, cobrancaId]).catch(() => {});
+}
+
+// tira a cobrança do Asaas (o Pix de lá é cancelado na próxima rodada) — usado ao trocar para o Pix normal
+async function soltarCobranca(cobrancaId) {
+  const { rows } = await q("SELECT asaas_id, asaas_status FROM cobrancas WHERE id=$1 AND status='aberto'", [cobrancaId]);
+  const r = rows[0];
+  if (r && r.asaas_id && r.asaas_status !== 'pago') await q('INSERT INTO asaas_cancelar (asaas_id) VALUES ($1) ON CONFLICT DO NOTHING', [r.asaas_id]);
+  await q("UPDATE cobrancas SET asaas_id=NULL, asaas_valor=NULL, asaas_venc=NULL, asaas_link=NULL, asaas_pix=NULL, asaas_status=NULL, asaas_erro=NULL WHERE id=$1 AND status='aberto'", [cobrancaId]);
+}
+
+// escolhe a forma do Pix só desta cobrança (null = seguir o cliente)
+async function definirModoCobranca(cobrancaId, modo) {
+  const m = modo === 'asaas' || modo === 'direto' ? modo : null;
+  const { rows } = await q('SELECT cb.*, cl.pix_asaas FROM cobrancas cb JOIN clientes cl ON cl.id=cb.cliente_id WHERE cb.id=$1', [cobrancaId]);
+  if (!rows[0]) return null;
+  await q('UPDATE cobrancas SET pix_modo=$1, asaas_erro=NULL WHERE id=$2', [m, cobrancaId]);
+  if (modoEfetivo({ pix_asaas: rows[0].pix_asaas }, { pix_modo: m }) === 'direto') await soltarCobranca(cobrancaId);
+  return m;
+}
+
+// liga/desliga o Asaas para o cliente; ao desligar, as cobranças abertas dele que seguem o cliente voltam para o Pix normal
+async function definirCliente(clienteId, ligado) {
+  await q('UPDATE clientes SET pix_asaas=$1 WHERE id=$2', [!!ligado, clienteId]);
+  const { rows } = await q("SELECT id FROM cobrancas WHERE cliente_id=$1 AND status='aberto' AND pix_modo IS NULL", [clienteId]);
+  for (const r of rows) {
+    if (!ligado) await soltarCobranca(r.id);
+    else await q('UPDATE cobrancas SET asaas_erro=NULL WHERE id=$1', [r.id]);
+  }
 }
 
 // ---------- Baixa automática ----------
@@ -339,6 +375,6 @@ async function configurarWebhook(urlBase) {
 }
 
 module.exports = {
-  iniciar, tick, conta, chamar, usaAsaas, pixDaCobranca, registrarErro, receberWebhook, confirmarPagamento,
+  iniciar, tick, conta, chamar, usaAsaas, modoEfetivo, definirModoCobranca, definirCliente, soltarCobranca, pixDaCobranca, registrarErro, receberWebhook, confirmarPagamento,
   testar, configurarWebhook, docValido, soDigitos, ambienteDaChave, gerarToken, ErroAsaas,
 };

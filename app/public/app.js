@@ -183,6 +183,7 @@ const ACOES_PERM = {
   '#ag-novo': 'agenda', '#ag-com': 'financeiro', '#ag-prof': 'agenda_config', '#ag-serv': 'agenda_config', '.ag-acao': 'agenda',
   '#ag-pac': 'agenda_config', '#cli-pacotes': 'agenda_config', '#vender-pacote': 'pagamentos', '[data-cancelar-pac]': 'pagamentos',
   '#wa-conectar': 'whatsapp', '#wa-sair': 'whatsapp', '#wa-teste': 'whatsapp',
+  '[data-pix-cli]': 'clientes', '[data-modo-pix]': 'pagamentos',
   '#lancar-consumo': 'pagamentos', '#cobrar-fiado': 'pagamentos', '[data-del-consumo]': 'pagamentos',
   '.cfg-regua': 'configuracoes', '#cx-venda': 'pagamentos', '[data-del-venda]': 'pagamentos', '#cx-mov': 'financeiro', '[data-del-mov]': 'financeiro', '#cx-prod': 'agenda_config',
 };
@@ -392,10 +393,48 @@ function desenharExecucao(ex, tamFila) {
   }
 }
 
+// Escolha da forma do Pix desta cobrança: Asaas (baixa automática) ou Pix normal
+function seletorPix(p) {
+  if (!CONFIG.asaas_ativo) return '';
+  const padrao = p.cliente_asaas ? 'Asaas' : 'Pix normal';
+  return `<div class="pix-forma">
+    <div class="seg" role="group" aria-label="Forma do Pix">
+      <button type="button" data-modo-pix="asaas" class="${p.modo === 'asaas' ? 'sel' : ''}">${ic('pix', 'ic-in')} Asaas</button>
+      <button type="button" data-modo-pix="direto" class="${p.modo === 'direto' ? 'sel' : ''}">Pix normal</button>
+    </div>
+    <div class="muted pequeno" style="margin-top:6px">${p.pix_modo ? `Escolhido só para esta cobrança. O padrão do cliente é ${padrao}. <a href="#" data-modo-pix="">Voltar ao padrão</a>` : `Seguindo o padrão do cliente: ${padrao}.${p.modo === 'asaas' ? ' Baixa automática quando pagar.' : ''}`}</div>
+    ${p.modo === 'asaas' && p.aviso_asaas ? `<div class="aviso pequeno" style="margin-top:8px">${ic('alerta')} ${esc(p.aviso_asaas)}</div>` : ''}
+  </div>`;
+}
+function ligarSeletorPix(cobId, reabrir) {
+  $$('[data-modo-pix]').forEach((b) => b.onclick = async (e) => {
+    e.preventDefault();
+    if (b.classList.contains('sel')) return;
+    try {
+      await api(`/cobrancas/${cobId}/pix-modo`, { method: 'POST', body: { modo: b.dataset.modoPix || null } });
+      toast(b.dataset.modoPix === 'direto' ? 'Esta cobrança vai pelo Pix normal' : b.dataset.modoPix === 'asaas' ? 'Esta cobrança vai pelo Asaas' : 'Voltou ao padrão do cliente');
+      reabrir();
+    } catch (er) { toast(er.message, true); }
+  });
+}
+
+async function modalPixCobranca(cobId) {
+  try {
+    const p = await api(`/cobrancas/${cobId}/pix`);
+    abrirModal(`<div class="modal-topo"><h2>Pix · ${esc(p.cliente)}</h2><button class="fechar" data-fechar>×</button></div>
+      <div class="modal-corpo" style="text-align:center">${seletorPix(p)}${p.asaas ? `<div class="aviso ok pequeno" style="text-align:left">${ic('check')} Pix do Asaas: quando o cliente pagar, a baixa é automática.${p.link ? ` <a href="${esc(p.link)}" target="_blank" rel="noopener">Abrir página de pagamento</a>` : ''}</div>` : CONFIG.asaas_ativo ? '<div class="aviso info pequeno" style="text-align:left">Pix normal: o dinheiro cai direto na chave da empresa. Confira o comprovante e dê baixa manualmente.</div>' : ''}<img src="${p.qr}" style="width:240px;height:240px"><div class="codigo" style="text-align:left">${esc(p.codigo)}</div></div>
+      <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario" id="copiar-pix">Copiar código</button></div>`);
+    $('#copiar-pix').onclick = async () => { (await copiarTexto(p.codigo)) ? toast('Código copiado ✓') : toast('Não consegui copiar. Selecione o código e copie.', true); };
+    ligarSeletorPix(cobId, () => { modalPixCobranca(cobId); recarregarFundo(); });
+  } catch (e) { toast(e.message, true); }
+}
+// atualiza a lista por trás do modal sem fechá-lo
+function recarregarFundo() { if (location.hash.startsWith('#/cobrancas')) pgCobrancas($('#conteudo')).catch(() => {}); }
+
 async function modalPrevia(cobId) {
   const p = await api(`/cobrancas/${cobId}/previa`);
   abrirModal(`<div class="modal-topo"><h2>Mensagem · ${esc(p.etapa_nome)}</h2><button class="fechar" data-fechar>×</button></div>
-    <div class="modal-corpo"><div class="previa">${esc(p.texto)}</div>
+    <div class="modal-corpo">${seletorPix(p)}<div class="previa">${esc(p.texto)}</div>
     ${p.pix ? `<div class="previa" style="margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:11px;word-break:break-all">${esc(p.pix)}</div>${p.asaas ? `<div class="muted pequeno" style="margin-top:6px">${ic('pix', 'ic-in')} Pix automático do Asaas (baixa sozinha quando pagar)</div>` : ''}` : '<div class="aviso" style="margin-top:10px">Cadastre a chave Pix em Configurações para enviar o Pix junto.</div>'}</div>
     <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario" id="enviar-agora">Enviar agora</button></div>`);
   $('#enviar-agora').onclick = async () => {
@@ -403,6 +442,7 @@ async function modalPrevia(cobId) {
     try { await api(`/cobrancas/${cobId}/enviar`, { method: 'POST' }); toast('Mensagem enviada ✓'); fecharModal(); rotear(); }
     catch (e) { toast(e.message, true); $('#enviar-agora').disabled = false; }
   };
+  ligarSeletorPix(cobId, () => { modalPrevia(cobId); recarregarFundo(); });
 }
 
 // ---------- Clientes ----------
@@ -418,6 +458,7 @@ async function pgClientes(el) {
         <select id="f-status">
           <option value="">Todos</option><option value="atraso">Em atraso</option><option value="aberto">Em aberto no mês</option>
           <option value="pago">Pago no mês</option><option value="pausado">Pausados</option><option value="inativo">Inativos</option>
+          ${CONFIG.asaas_ativo ? '<option value="asaas">Pix automático (Asaas)</option><option value="pixnormal">Pix normal</option>' : ''}
         </select></div><div class="muted pequeno" id="contagem"></div></div>
       <div class="tabela-wrap"><table>
         <thead><tr><th>Cliente</th><th>Telefone</th><th class="num">Valor</th><th>Forma</th><th>Próx. vencimento</th><th>Situação</th><th></th></tr></thead>
@@ -434,6 +475,8 @@ async function pgClientes(el) {
         case 'pago': return c.status_mes === 'pago';
         case 'pausado': return c.pausado;
         case 'inativo': return !c.ativo;
+        case 'asaas': return c.pix_asaas !== false;
+        case 'pixnormal': return c.pix_asaas === false;
         default: return true;
       }
     });
@@ -447,7 +490,7 @@ async function pgClientes(el) {
       if (c.pausado) sit += ' <span class="tag pausado">Régua pausada</span>';
       const prox = c.proxima ? `${brData(c.proxima.vencimento)}${c.proxima.numero_parcela ? ` · ${c.proxima.numero_parcela}/${c.parcelas_total}` : ''}${Number(c.proxima.valor) !== Number(c.valor) ? `<div class="sub2">${brl(c.proxima.valor)}</div>` : ''}` : '—';
       return `<tr>
-        <td><a href="#" data-ver="${c.id}"><b>${esc(c.nome)}</b></a><div class="sub2">${esc(c.identificacao || '')}</div></td>
+        <td><a href="#" data-ver="${c.id}"><b>${esc(c.nome)}</b></a><div class="sub2">${esc(c.identificacao || '')}${CONFIG.asaas_ativo ? `${c.identificacao ? ' · ' : ''}${c.pix_asaas === false ? 'Pix normal' : c.cpf_cnpj ? `${ic('pix', 'ic-in')} Asaas` : '<span style="color:var(--amarelo)">Asaas sem CPF</span>'}` : ''}</div></td>
         <td class="nw">${fone(c.telefone)}</td>
         <td class="num">${c.forma === 'avulso' ? '—' : brl(c.valor)}</td>
         <td>${esc(formaCliente(c))}${Number(c.fiado_pendente) ? `<div class="sub2"><span class="tag hoje">fiado ${brl(c.fiado_pendente)}</span></div>` : ''}</td>
@@ -561,6 +604,12 @@ async function modalFichaCliente(id) {
     <div class="modal-topo"><div><h2>${esc(c.nome)}</h2><div class="muted pequeno">${fone(c.telefone)} · ${c.forma === 'avulso' ? '' : brl(c.valor) + ' · '}${esc(formaCliente(c))}${c.cpf_cnpj ? ` · ${c.cpf_cnpj.length === 11 ? 'CPF' : 'CNPJ'} ${esc(c.cpf_cnpj)}` : ''}</div></div><button class="fechar" data-fechar>×</button></div>
     <div class="modal-corpo">
       ${c.observacoes ? `<div class="aviso info">${esc(c.observacoes)}</div>` : ''}
+      ${CONFIG.asaas_ativo ? `<div class="pix-cliente">
+        <div><b>Forma do Pix</b><div class="muted pequeno">${c.pix_asaas !== false ? (c.cpf_cnpj ? 'Pix automático do Asaas: a baixa é sozinha quando o cliente paga.' : 'Asaas ligado, mas falta o CPF/CNPJ no cadastro: por enquanto vai o Pix normal.') : 'Pix normal: o dinheiro cai direto na chave da empresa e a baixa é manual.'}</div></div>
+        <div class="seg" role="group" aria-label="Forma do Pix do cliente">
+          <button type="button" data-pix-cli="1" class="${c.pix_asaas !== false ? 'sel' : ''}">Asaas</button>
+          <button type="button" data-pix-cli="0" class="${c.pix_asaas === false ? 'sel' : ''}">Pix normal</button>
+        </div></div>` : ''}
       <div class="cartao-topo" style="padding:0;margin-bottom:8px;border:0"><h3 style="margin:0">Consumo avulso / fiado</h3>
         <div class="acoes"><button class="btn mini primario" id="lancar-consumo">${ic('mais')} Lançar consumo</button>${totPend ? `<button class="btn mini" id="cobrar-fiado">Cobrar fiado agora (${brl(totPend)})</button>` : ''}</div></div>
       ${totPend ? `<div class="aviso pequeno">Fiado pendurado: <b>${brl(totPend)}</b>. ${c.forma === 'avulso' ? 'Clique em “Cobrar fiado agora” para mandar a cobrança.' : 'Entra sozinho na próxima cobrança do cliente.'}</div>` : ''}
@@ -580,7 +629,7 @@ async function modalFichaCliente(id) {
       <div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Referente a</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
       ${c.cobrancas.map((cb) => `<tr><td>${esc(refCobranca(cb, c.forma))}${cb.numero_parcela ? ` <span class="sub2">(${cb.numero_parcela}/${c.parcelas_total})</span>` : ''}${cb.tipo === 'avulsa' ? ' <span class="tag">avulsa</span>' : ''}</td>
         <td>${brData(cb.vencimento)}</td><td class="num">${brl(cb.valor)}</td>
-        <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">pago ${brData(cb.pago_em)}${/^Asaas/.test(cb.pago_por || '') ? ' · Asaas' : ''}</div>` : ''}${infoAsaas(cb)}</td>
+        <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">pago ${brData(cb.pago_em)}${/^Asaas/.test(cb.pago_por || '') ? ' · Asaas' : ''}</div>` : ''}${infoAsaas({ ...cb, cliente_pix_asaas: c.pix_asaas })}</td>
         <td class="num">${acoesCobranca(cb)}</td></tr>`).join('') || '<tr><td colspan="5" class="vazio">Sem cobranças</td></tr>'}
       </tbody></table></div>
       <h3>Cobranças enviadas pelo WhatsApp</h3>
@@ -591,6 +640,16 @@ async function modalFichaCliente(id) {
   ligarAcoesCobranca($('#modal-caixa'), () => modalFichaCliente(id));
   $('#editar-ficha').onclick = () => modalCliente(c, () => rotear());
   $('#lancar-consumo').onclick = () => modalConsumo(c, () => modalFichaCliente(id));
+  $$('[data-pix-cli]').forEach((b) => b.onclick = async () => {
+    if (b.classList.contains('sel')) return;
+    const ligar = b.dataset.pixCli === '1';
+    try {
+      await api(`/clientes/${id}/pix-asaas`, { method: 'POST', body: { ligado: ligar } });
+      toast(ligar ? 'Cliente no Pix automático (Asaas)' : 'Cliente no Pix normal');
+      modalFichaCliente(id);
+      if (location.hash.startsWith('#/clientes') || location.hash.startsWith('#/cobrancas')) rotear();
+    } catch (e) { toast(e.message, true); }
+  });
   const vp = $('#vender-pacote'); if (vp) vp.onclick = () => modalVenderPacote(c, () => modalFichaCliente(id));
   $$('[data-cancelar-pac]').forEach((b) => b.onclick = async () => {
     if (!(await confirmar('Cancelar pacote?', 'O saldo que sobrou deixa de valer. Se ele tem cobrança em aberto, cancele também em Cobranças.', 'Cancelar pacote', true))) return modalFichaCliente(id);
@@ -615,9 +674,10 @@ async function modalFichaCliente(id) {
 // situação no Asaas (só aparece com o Pix automático ligado)
 function infoAsaas(cb) {
   if (!CONFIG || !CONFIG.asaas_ativo || cb.status !== 'aberto') return '';
+  const modo = cb.pix_modo || (cb.cliente_pix_asaas === false ? 'direto' : 'asaas');
+  if (modo === 'direto') return `<div class="sub2">Pix normal${cb.pix_modo ? ' (só nesta)' : ''}</div>`;
   if (cb.asaas_erro) return `<div class="sub2" style="color:var(--amarelo)" title="${esc(cb.asaas_erro)}">${ic('alerta', 'ic-in')} ${esc(cb.asaas_erro.length > 46 ? cb.asaas_erro.slice(0, 44) + '…' : cb.asaas_erro)}</div>`;
-  if (cb.asaas_id) return `<div class="sub2">${ic('pix', 'ic-in')} Pix automático</div>`;
-  return '';
+  return `<div class="sub2">${ic('pix', 'ic-in')} Pix automático${cb.pix_modo ? ' (só nesta)' : ''}</div>`;
 }
 
 function acoesCobranca(cb) {
@@ -639,15 +699,7 @@ function ligarAcoesCobranca(raiz, recarregar) {
     recarregar();
   });
   $$('[data-previa-cob]', raiz).forEach((b) => b.onclick = () => modalPrevia(b.dataset.previaCob));
-  $$('[data-pix]', raiz).forEach((b) => b.onclick = async () => {
-    try {
-      const p = await api(`/cobrancas/${b.dataset.pix}/pix`);
-      abrirModal(`<div class="modal-topo"><h2>Pix · ${esc(p.cliente)}</h2><button class="fechar" data-fechar>×</button></div>
-        <div class="modal-corpo" style="text-align:center">${p.asaas ? `<div class="aviso ok pequeno" style="text-align:left">${ic('check')} Pix do Asaas: quando o cliente pagar, a baixa é automática.${p.link ? ` <a href="${esc(p.link)}" target="_blank" rel="noopener">Abrir página de pagamento</a>` : ''}</div>` : ''}<img src="${p.qr}" style="width:240px;height:240px"><div class="codigo" style="text-align:left">${esc(p.codigo)}</div></div>
-        <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario" id="copiar-pix">Copiar código</button></div>`);
-      $('#copiar-pix').onclick = async () => { (await copiarTexto(p.codigo)) ? toast('Código copiado ✓') : toast('Não consegui copiar. Selecione o código e copie.', true); };
-    } catch (e) { toast(e.message, true); }
-  });
+  $$('[data-pix]', raiz).forEach((b) => b.onclick = () => modalPixCobranca(b.dataset.pix));
 }
 
 function modalPagar(id, valor, aoSalvar) {

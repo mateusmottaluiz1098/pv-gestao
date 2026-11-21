@@ -434,3 +434,10 @@ body[data-pg="agenda"] .ag-resumo { padding: 7px 14px; }
   main { margin: 0; } #conteudo { padding: 0; max-width: none; }
   .cartao { box-shadow: none; break-inside: avoid; }
 }
+
+/* Forma do Pix (Asaas x Pix normal) */
+.pix-forma { text-align: left; margin-bottom: 12px; }
+.pix-forma .seg button, .pix-cliente .seg button { display: inline-flex; align-items: center; gap: 6px; }
+.pix-forma .seg button.sel, .pix-cliente .seg button.sel { background: var(--azul-3); color: #fff; }
+.pix-cliente { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border: 1px solid var(--borda); border-radius: var(--raio); padding: 12px 14px; margin-bottom: 16px; background: #f8fafc; }
+.pix-cliente > div:first-child { min-width: 0; flex: 1 1 220px; }

@@ -379,6 +379,7 @@ app.put('/api/clientes/:id', pode('clientes'), rota(async (req, res) => {
   );
   await C.ajustarCobrancasFuturas(rows[0], antes[0]);
   await C.gerarCobrancas(rows[0].id);
+  if (antes[0].pix_asaas !== rows[0].pix_asaas) await ASAAS.definirCliente(rows[0].id, rows[0].pix_asaas);
   res.json(rows[0]);
 }));
 
@@ -392,7 +393,7 @@ app.get('/api/cobrancas', rota(async (req, res) => {
   await C.gerarCobrancas();
   const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : U.hoje().slice(0, 7);
   const { rows } = await q(`
-    SELECT cb.*, cl.nome, cl.telefone, cl.parcelas_total, cl.identificacao, cl.forma,
+    SELECT cb.*, cl.nome, cl.telefone, cl.parcelas_total, cl.identificacao, cl.forma, cl.pix_asaas AS cliente_pix_asaas, cl.cpf_cnpj AS cliente_doc,
       (SELECT MAX(criado_em) FROM mensagens WHERE cobranca_id=cb.id AND direcao='saida' AND status='enviado') AS ultima_msg,
       (SELECT COUNT(*)::int FROM mensagens WHERE cobranca_id=cb.id AND direcao='saida' AND status='enviado') AS qtd_msgs
     FROM cobrancas cb JOIN clientes cl ON cl.id=cb.cliente_id
@@ -438,7 +439,23 @@ app.get('/api/cobrancas/:id/pix', rota(async (req, res) => {
   const { rows: cl } = await q('SELECT * FROM clientes WHERE id=$1', [rows[0].cliente_id]);
   const pix = await C.pixDaCobranca(rows[0], cl[0]);
   if (!pix) throw erro(400, 'Cadastre a chave Pix em Configurações');
-  res.json(pix);
+  res.json({ ...pix, ...(await infoModo(rows[0].id, cl[0])) });
+}));
+
+// forma do Pix da cobrança (para a escolha Asaas x Pix normal nas telas)
+async function infoModo(cobrancaId, cliente) {
+  const { rows } = await q('SELECT pix_modo, asaas_erro FROM cobrancas WHERE id=$1', [cobrancaId]);
+  const cb = rows[0] || {};
+  return { pix_modo: cb.pix_modo || null, modo: ASAAS.modoEfetivo(cliente, cb), cliente_asaas: cliente.pix_asaas !== false, aviso_asaas: cb.asaas_erro || null };
+}
+app.post('/api/cobrancas/:id/pix-modo', pode('pagamentos'), rota(async (req, res) => {
+  const m = await ASAAS.definirModoCobranca(req.params.id, req.body.modo);
+  if (m === null && !(await q('SELECT 1 FROM cobrancas WHERE id=$1', [req.params.id])).rows[0]) throw erro(404, 'Cobrança não encontrada');
+  res.json({ ok: true, pix_modo: m });
+}));
+app.post('/api/clientes/:id/pix-asaas', pode('clientes'), rota(async (req, res) => {
+  await ASAAS.definirCliente(req.params.id, !!req.body.ligado);
+  res.json({ ok: true, pix_asaas: !!req.body.ligado });
 }));
 
 app.get('/api/cobrancas/:id/previa', rota(async (req, res) => {
@@ -448,7 +465,7 @@ app.get('/api/cobrancas/:id/previa', rota(async (req, res) => {
   const etapa = await etapaPara(rows[0]);
   const pix = await C.pixDaCobranca(rows[0], cl[0]);
   const texto = await C.renderizar(etapa.modelo, cl[0], rows[0], { link: pix && pix.link });
-  res.json({ texto, pix: pix && pix.codigo, asaas: !!(pix && pix.asaas), etapa: etapa.id, etapa_nome: C.nomeEtapa(etapa.dias) });
+  res.json({ texto, pix: pix && pix.codigo, asaas: !!(pix && pix.asaas), etapa: etapa.id, etapa_nome: C.nomeEtapa(etapa.dias), ...(await infoModo(rows[0].id, cl[0])) });
 }));
 
 async function etapaPara(cb) {
