@@ -78,7 +78,112 @@ async function porProfissional(mes) {
   }).filter((r) => r.atendimentos || r.produtos || r.faltas);
 }
 
+// ---------- Previsão de recebimentos do mês ----------
+// Junta as cobranças que já existem com vencimento no mês e projeta as que o sistema ainda vai gerar
+// (parcelas de carnê e mensalidades: o gerador só cria até o mês seguinte).
+const PASSO = { semanal: 7, quinzenal: 14 };
+const idxMes = (iso) => { const [y, m] = iso.split('-').map(Number); return y * 12 + (m - 1); };
+
+async function previsao(mes) {
+  const cfg = require('./config');
+  const c = await cfg.obter();
+  const hoje = U.hoje();
+  const ini = `${mes}-01`;
+  const [y, m] = mes.split('-').map(Number);
+  const fim = U.vencimentoNoMes(y, m, 31);
+  const asaasLigado = !!(c.asaas_ativo && c.asaas_chave);
+  const { rows: reais } = await q(`
+    SELECT cb.id, cb.cliente_id, cb.vencimento, cb.valor, cb.status, cb.pago_em, cb.pago_valor, cb.tipo, cb.numero_parcela, cb.descricao,
+           cb.competencia, cb.pix_modo, cb.asaas_id, cb.pago_por, cl.nome, cl.forma, cl.parcelas_total, cl.pix_asaas
+      FROM cobrancas cb JOIN clientes cl ON cl.id = cb.cliente_id
+     WHERE cb.vencimento BETWEEN $1 AND $2 AND cb.status <> 'cancelado'
+     ORDER BY cb.vencimento, cl.nome`, [ini, fim]);
+  // competências que já têm cobrança recorrente (de qualquer situação) para não projetar de novo
+  const { rows: ocup } = await q(`SELECT cliente_id, competencia FROM cobrancas WHERE tipo = 'recorrente' AND competencia BETWEEN $1 AND $2`,
+    [U.somarDias(ini, -1), fim]);
+  const tem = new Set(ocup.map((r) => `${r.cliente_id}:${r.competencia}`));
+  const { rows: clientes } = await q(`SELECT * FROM clientes WHERE ativo AND forma IN ('mensal','carne','semanal','quinzenal')`);
+
+  const categoria = (forma, tipo) => (tipo === 'avulsa' ? 'avulsa' : forma === 'carne' ? 'carne' : 'mensalidade');
+  const pixDe = (pixModo, clientePix) => (!asaasLigado ? null : (pixModo || (clientePix === false ? 'direto' : 'asaas')));
+  const itens = reais.map((r) => {
+    const sit = r.status === 'pago' ? 'pago' : r.vencimento < hoje ? 'atrasado' : 'a_receber';
+    let ref = r.descricao || (r.numero_parcela ? `Parcela ${r.numero_parcela}${r.parcelas_total ? '/' + r.parcelas_total : ''}` : r.tipo === 'avulsa' ? 'Avulsa' : `Mensalidade ${U.nomeMes(r.competencia)}`);
+    if (r.tipo !== 'avulsa' && r.forma === 'carne' && r.numero_parcela && !r.descricao) ref = `Carnê · parcela ${r.numero_parcela}${r.parcelas_total ? '/' + r.parcelas_total : ''}`;
+    return {
+      id: r.id, cliente_id: r.cliente_id, nome: r.nome, vencimento: r.vencimento, valor: Number(r.valor), referente: ref,
+      categoria: categoria(r.forma, r.tipo), situacao: sit, pago_em: r.pago_em, pago_valor: r.pago_valor != null ? Number(r.pago_valor) : null,
+      pix: pixDe(r.pix_modo, r.pix_asaas), asaas: !!r.asaas_id, projetado: false,
+    };
+  });
+  // projeção do que ainda não foi gerado
+  const mIdx = y * 12 + (m - 1);
+  for (const cl of clientes) {
+    if (!cl.primeiro_vencimento) continue;
+    const passo = PASSO[cl.forma];
+    const add = (venc, n) => itens.push({
+      id: null, cliente_id: cl.id, nome: cl.nome, vencimento: venc, valor: Number(cl.valor),
+      referente: cl.forma === 'carne' ? `Carnê · parcela ${n}${cl.parcelas_total ? '/' + cl.parcelas_total : ''}` : `Mensalidade ${U.nomeMes(`${mes}-01`)}`,
+      categoria: cl.forma === 'carne' ? 'carne' : 'mensalidade', situacao: venc < hoje ? 'atrasado' : 'previsto', pago_em: null, pago_valor: null,
+      pix: pixDe(null, cl.pix_asaas), asaas: false, projetado: true,
+    });
+    if (passo) {
+      let v = cl.primeiro_vencimento;
+      if (v < ini) v = U.somarDias(v, Math.ceil(U.diffDias(ini, v) / passo) * passo);
+      for (; v <= fim; v = U.somarDias(v, passo)) if (v >= hoje && !tem.has(`${cl.id}:${v}`)) add(v, null);
+      continue;
+    }
+    const pIdx = idxMes(cl.primeiro_vencimento);
+    if (mIdx < pIdx) continue;
+    const n = mIdx - pIdx + 1;
+    if (cl.forma === 'carne' && (!cl.parcelas_total || n > cl.parcelas_total)) continue;
+    if (tem.has(`${cl.id}:${ini}`)) continue;
+    const venc = n === 1 ? cl.primeiro_vencimento : U.vencimentoNoMes(y, m, cl.dia_vencimento);
+    if (venc < hoje) continue; // mês passado que nunca foi gerado: não é previsão
+    add(venc, n);
+  }
+  itens.sort((a, b) => a.vencimento.localeCompare(b.vencimento) || a.nome.localeCompare(b.nome));
+
+  const soma = (f) => Math.round(itens.filter(f).reduce((t, i) => t + (i.situacao === 'pago' ? (i.pago_valor ?? i.valor) : i.valor), 0) * 100) / 100;
+  const conta = (f) => itens.filter(f).length;
+  const resumo = {
+    previsto: soma(() => true), qtd: itens.length,
+    recebido: soma((i) => i.situacao === 'pago'), qtd_recebido: conta((i) => i.situacao === 'pago'),
+    a_receber: soma((i) => i.situacao === 'a_receber' || i.situacao === 'previsto'), qtd_a_receber: conta((i) => i.situacao === 'a_receber' || i.situacao === 'previsto'),
+    atrasado: soma((i) => i.situacao === 'atrasado'), qtd_atrasado: conta((i) => i.situacao === 'atrasado'),
+    projetado: soma((i) => i.projetado), qtd_projetado: conta((i) => i.projetado),
+  };
+  const porCategoria = ['carne', 'mensalidade', 'avulsa'].map((k) => ({
+    categoria: k, total: soma((i) => i.categoria === k), qtd: conta((i) => i.categoria === k),
+    recebido: soma((i) => i.categoria === k && i.situacao === 'pago'),
+  })).filter((x) => x.qtd);
+  const porPix = asaasLigado ? ['asaas', 'direto'].map((k) => ({ pix: k, total: soma((i) => i.pix === k), qtd: conta((i) => i.pix === k) })).filter((x) => x.qtd) : [];
+  return { mes, hoje, resumo, por_categoria: porCategoria, por_pix: porPix, itens };
+}
+
+// previsto de cada um dos próximos meses (para o gráfico)
+async function previsaoMeses(de, n) {
+  const out = [];
+  const [y, m] = de.split('-').map(Number);
+  for (let i = 0; i < n; i++) {
+    const d = new Date(Date.UTC(y, m - 1 + i, 1));
+    const mes = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    const p = await previsao(mes);
+    out.push({ mes, total: p.resumo.previsto, recebido: p.resumo.recebido, qtd: p.resumo.qtd });
+  }
+  return out;
+}
+
 function rotas(app, { rota, pode }) {
+  app.get('/api/relatorios/previsao', pode('financeiro'), rota(async (req, res) => {
+    const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : U.hoje().slice(0, 7);
+    res.json(await previsao(mes));
+  }));
+  app.get('/api/relatorios/previsao-meses', pode('financeiro'), rota(async (req, res) => {
+    const de = /^\d{4}-\d{2}$/.test(req.query.de || '') ? req.query.de : U.hoje().slice(0, 7);
+    const n = Math.min(18, Math.max(3, parseInt(req.query.meses, 10) || 12));
+    res.json({ meses: await previsaoMeses(de, n) });
+  }));
   app.get('/api/relatorios/mensal', pode('financeiro'), rota(async (req, res) => {
     const n = Math.min(24, Math.max(3, parseInt(req.query.meses, 10) || 12));
     const ate = /^\d{4}-\d{2}$/.test(req.query.ate || '') ? req.query.ate : U.hoje().slice(0, 7);
@@ -91,4 +196,4 @@ function rotas(app, { rota, pode }) {
   }));
 }
 
-module.exports = { rotas, mensal, porProfissional };
+module.exports = { rotas, mensal, porProfissional, previsao, previsaoMeses };
