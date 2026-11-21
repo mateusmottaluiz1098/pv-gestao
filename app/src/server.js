@@ -477,6 +477,50 @@ async function etapaPara(cb) {
   return eleg.length ? eleg[eleg.length - 1] : etapas[0];
 }
 
+// ---------- Nova cobrança (avulsa ou parcelada), com cliente existente ou cadastro rápido ----------
+function somarMeses(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = (m - 1) + n;
+  return U.vencimentoNoMes(y + Math.floor(t / 12), (t % 12) + 1, d);
+}
+app.post('/api/cobrancas', pode('pagamentos'), rota(async (req, res) => {
+  const b = req.body || {};
+  const vTxt = String(b.valor ?? '').trim();
+  const valor = Number(vTxt.includes(',') ? vTxt.replace(/\./g, '').replace(',', '.') : vTxt) || 0;
+  if (!(valor > 0)) throw erro(400, 'Informe o valor da cobrança');
+  const descricao = String(b.descricao || '').trim().slice(0, 120);
+  if (!descricao) throw erro(400, 'Informe a que se refere a cobrança (ex.: Instalação do painel)');
+  const venc = /^\d{4}-\d{2}-\d{2}$/.test(b.vencimento || '') ? b.vencimento : U.hoje();
+  const parcelas = Math.min(Math.max(parseInt(b.parcelas, 10) || 1, 1), 36);
+  const valorTotal = !!b.valor_total; // o valor informado é o total (divide nas parcelas) ou o de cada parcela
+  const modo = b.pix_modo === 'asaas' || b.pix_modo === 'direto' ? b.pix_modo : null;
+
+  let clienteId = parseInt(b.cliente_id, 10) || null;
+  if (!clienteId) {
+    if (!USR.tem(req.usuario, 'clientes')) throw erro(403, 'Seu usuário não pode cadastrar clientes. Escolha um cliente já cadastrado.');
+    const n = b.novo_cliente || {};
+    const c = validarCliente({ nome: n.nome, telefone: n.telefone, cpf_cnpj: n.cpf_cnpj, forma: 'avulso', valor: 0, pix_asaas: true });
+    const { rows } = await q(
+      `INSERT INTO clientes (nome, telefone, valor, forma, dia_vencimento, primeiro_vencimento, cpf_cnpj, pix_asaas)
+       VALUES ($1,$2,0,'avulso',1,$3,$4,TRUE) RETURNING id`, [c.nome, c.telefone, c.primeiro_vencimento, c.cpf_cnpj]);
+    clienteId = rows[0].id;
+  } else if (!(await q('SELECT 1 FROM clientes WHERE id=$1', [clienteId])).rows[0]) throw erro(404, 'Cliente não encontrado');
+
+  // centavos: a sobra da divisão vai na 1ª parcela
+  const cent = Math.round(valor * 100);
+  const base = valorTotal ? Math.floor(cent / parcelas) : cent;
+  const criadas = [];
+  for (let i = 0; i < parcelas; i++) {
+    const v = (valorTotal && i === 0 ? base + (cent - base * parcelas) : base) / 100;
+    const cb = await C.criarAvulsa(clienteId, {
+      valor: v, vencimento: somarMeses(venc, i), descricao: parcelas > 1 ? `${descricao} (${i + 1}/${parcelas})` : descricao,
+    });
+    if (modo) await q('UPDATE cobrancas SET pix_modo=$1 WHERE id=$2', [modo, cb.id]);
+    criadas.push(cb);
+  }
+  res.json({ ok: true, cliente_id: clienteId, cobrancas: criadas.map((c) => ({ id: c.id, vencimento: c.vencimento, valor: c.valor })) });
+}));
+
 app.post('/api/cobrancas/:id/enviar', pode('envios'), rota(async (req, res) => {
   const { rows } = await q('SELECT * FROM cobrancas WHERE id=$1', [req.params.id]);
   if (!rows[0]) throw erro(404, 'Cobrança não encontrada');

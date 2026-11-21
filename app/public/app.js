@@ -177,7 +177,7 @@ window.addEventListener('hashchange', rotear);
 
 // Esconde botões que o usuário não pode usar (o servidor também bloqueia)
 const ACOES_PERM = {
-  '#novo-cli': 'clientes', '[data-editar]': 'clientes', '#editar-ficha': 'clientes', '#excluir-cli': 'clientes',
+  '#novo-cli': 'clientes', '#nova-cob': 'pagamentos', '#nova-cob-cli': 'pagamentos', '[data-editar]': 'clientes', '#editar-ficha': 'clientes', '#excluir-cli': 'clientes',
   '[data-pagar]': 'pagamentos', '[data-desfazer]': 'pagamentos', '[data-cancelar]': 'pagamentos', '[data-aceitar]': 'pagamentos', '[data-recusar]': 'pagamentos',
   '#rodar-fila': 'envios', '#parar-fila': 'envios', '#enviar-agora': 'envios',
   '#ag-novo': 'agenda', '#ag-com': 'financeiro', '#ag-prof': 'agenda_config', '#ag-serv': 'agenda_config', '.ag-acao': 'agenda',
@@ -431,6 +431,117 @@ async function modalPixCobranca(cobId) {
 // atualiza a lista por trás do modal sem fechá-lo
 function recarregarFundo() { if (location.hash.startsWith('#/cobrancas')) pgCobrancas($('#conteudo')).catch(() => {}); }
 
+// ---------- Nova cobrança (avulsa ou parcelada) ----------
+async function modalNovaCobranca(clientePre) {
+  let lista = [];
+  try { lista = (await api('/clientes')).filter((c) => c.ativo); } catch (e) { /* segue com cadastro rápido */ }
+  const podeCli = pode('clientes');
+  const rotulo = (c) => `${c.nome} · ${fone(c.telefone)}`;
+  const pre = clientePre ? lista.find((c) => c.id == clientePre) : null;
+  abrirModal(`<form id="f-novacob">
+    <div class="modal-topo"><h2>Nova cobrança</h2><button type="button" class="fechar" data-fechar>×</button></div>
+    <div class="modal-corpo">
+      ${podeCli ? `<div class="seg" role="group" aria-label="Cliente" style="margin-bottom:12px">
+        <button type="button" data-qual="existente" class="sel">Cliente cadastrado</button>
+        <button type="button" data-qual="novo">Novo cliente</button></div>` : ''}
+      <div id="cob-existente">
+        <label>Cliente *<input name="cliente_busca" list="cob-clientes" autocomplete="off" placeholder="Digite o nome ou o telefone" value="${pre ? esc(rotulo(pre)) : ''}"></label>
+        <datalist id="cob-clientes">${lista.map((c) => `<option value="${esc(rotulo(c))}"></option>`).join('')}</datalist>
+        <div class="ajuda" id="cob-cli-info" style="margin-bottom:10px"></div>
+      </div>
+      <div id="cob-novo" class="hidden">
+        <label>Nome do cliente *<input name="n_nome" autocomplete="off"></label>
+        <div class="linha">
+          <label>WhatsApp com DDD *<input name="n_telefone" inputmode="tel" placeholder="51 99999-9999"></label>
+          <label>CPF ou CNPJ ${CONFIG.asaas_ativo ? '' : '(opcional)'}<input name="n_cpf" inputmode="numeric" placeholder="só números">${CONFIG.asaas_ativo ? '<div class="ajuda">Necessário para o Pix automático (Asaas).</div>' : ''}</label>
+        </div>
+        <div class="ajuda" style="margin:-4px 0 12px">O cliente é cadastrado como “Só avulso”: não gera mensalidade sozinho.</div>
+      </div>
+      <label>Referente a *<input name="descricao" maxlength="120" placeholder="ex.: Instalação do painel, Aluguel do outdoor (dezembro)"></label>
+      <div class="linha">
+        <label>Valor (R$) *<input name="valor" inputmode="decimal" placeholder="0,00"></label>
+        <label>Vencimento *<input name="vencimento" type="date" value="${dataLocal()}"></label>
+      </div>
+      <div class="linha">
+        <label>Parcelas<select name="parcelas">${Array.from({ length: 24 }, (_, i) => `<option value="${i + 1}">${i ? `${i + 1}x (uma por mês)` : 'À vista (1x)'}</option>`).join('')}</select></label>
+        <label id="cob-tipo-valor" class="hidden">O valor informado é<select name="valor_total"><option value="0">de cada parcela</option><option value="1">o total (dividir)</option></select></label>
+      </div>
+      ${CONFIG.asaas_ativo ? `<label>Forma do Pix<select name="pix_modo"><option value="">Padrão do cliente</option><option value="asaas">Asaas (baixa automática)</option><option value="direto">Pix normal</option></select></label>` : ''}
+      <div class="previa pequeno" id="cob-resumo" style="margin-bottom:10px"></div>
+      ${pode('envios') ? '<label class="check"><input type="checkbox" name="enviar"> Enviar a cobrança agora pelo WhatsApp</label>' : ''}
+    </div>
+    <div class="modal-rodape"><button type="button" class="btn" data-fechar>Cancelar</button><button class="btn primario" id="salvar-cob">Criar cobrança</button></div>
+  </form>`);
+  const f = $('#f-novacob');
+  let qual = 'existente';
+  const achar = () => {
+    const t = f.cliente_busca.value.trim().toLowerCase();
+    if (!t) return null;
+    return lista.find((c) => rotulo(c).toLowerCase() === t) || (() => {
+      const dig = t.replace(/\D/g, '');
+      const m = lista.filter((c) => c.nome.toLowerCase().includes(t) || (dig.length >= 4 && String(c.telefone).includes(dig)));
+      return m.length === 1 ? m[0] : null;
+    })();
+  };
+  const numero = (v) => { v = String(v || '').trim(); return Number(v.includes(',') ? v.replace(/\./g, '').replace(',', '.') : v) || 0; };
+  const resumo = () => {
+    const c = qual === 'existente' ? achar() : null;
+    $('#cob-cli-info').innerHTML = qual !== 'existente' || !f.cliente_busca.value.trim() ? ''
+      : c ? `${ic('check', 'ic-in')} ${esc(c.nome)}${CONFIG.asaas_ativo ? ` · ${c.pix_asaas === false ? 'Pix normal' : c.cpf_cnpj ? 'Asaas' : 'Asaas sem CPF (vai Pix normal)'}` : ''}`
+        : '<span style="color:var(--amarelo)">Escolha um cliente da lista' + (podeCli ? ' ou use “Novo cliente”' : '') + '.</span>';
+    const n = Number(f.parcelas.value);
+    $('#cob-tipo-valor').classList.toggle('hidden', n === 1);
+    const v = numero(f.valor.value);
+    if (!(v > 0) || !f.vencimento.value) { $('#cob-resumo').innerHTML = '<span class="muted">Preencha valor e vencimento para ver o resumo.</span>'; return; }
+    const total = n > 1 && f.valor_total.value === '1';
+    const parc = total ? v / n : v;
+    const vencs = [];
+    const [y, m, d] = f.vencimento.value.split('-').map(Number);
+    for (let i = 0; i < Math.min(n, 4); i++) {
+      const t = m - 1 + i; const yy = y + Math.floor(t / 12); const mm = (t % 12) + 1;
+      const dd = Math.min(d, new Date(yy, mm, 0).getDate());
+      vencs.push(`${String(dd).padStart(2, '0')}/${String(mm).padStart(2, '0')}${yy !== y ? '/' + String(yy).slice(2) : ''}`);
+    }
+    $('#cob-resumo').innerHTML = n === 1 ? `1 cobrança de <b>${brl(v)}</b> vencendo em <b>${brData(f.vencimento.value)}</b>.`
+      : `${n} cobranças de <b>${brl(parc)}</b> (total ${brl(total ? v : v * n)}), uma por mês: ${vencs.join(', ')}${n > 4 ? '…' : ''}.`;
+  };
+  $$('[data-qual]').forEach((b) => b.onclick = () => {
+    qual = b.dataset.qual;
+    $$('[data-qual]').forEach((x) => x.classList.toggle('sel', x === b));
+    $('#cob-existente').classList.toggle('hidden', qual !== 'existente');
+    $('#cob-novo').classList.toggle('hidden', qual !== 'novo');
+    (qual === 'novo' ? f.n_nome : f.cliente_busca).focus();
+    resumo();
+  });
+  ['input', 'change'].forEach((ev) => f.addEventListener(ev, resumo));
+  resumo();
+  (pre ? f.descricao : f.cliente_busca).focus();
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { descricao: f.descricao.value, valor: f.valor.value, vencimento: f.vencimento.value, parcelas: f.parcelas.value,
+      valor_total: f.valor_total.value === '1', pix_modo: f.pix_modo ? f.pix_modo.value : '' };
+    if (qual === 'existente') {
+      const c = achar();
+      if (!c) return toast('Escolha o cliente na lista' + (podeCli ? ' ou cadastre um novo.' : '.'), true);
+      body.cliente_id = c.id;
+    } else body.novo_cliente = { nome: f.n_nome.value, telefone: f.n_telefone.value, cpf_cnpj: f.n_cpf.value };
+    const bt = $('#salvar-cob'); bt.disabled = true;
+    try {
+      const r = await api('/cobrancas', { method: 'POST', body });
+      let msg = r.cobrancas.length > 1 ? `${r.cobrancas.length} cobranças criadas ✓` : 'Cobrança criada ✓';
+      if (f.enviar && f.enviar.checked) {
+        try { await api(`/cobrancas/${r.cobrancas[0].id}/enviar`, { method: 'POST' }); msg += ' Enviada pelo WhatsApp.'; }
+        catch (er) { toast(`Cobrança criada, mas não foi enviada: ${er.message}`, true); msg = ''; }
+      }
+      if (msg) toast(msg);
+      fecharModal();
+      mesCob = String(r.cobrancas[0].vencimento).slice(0, 7);
+      if (location.hash.startsWith('#/cobrancas')) rotear(); else location.hash = '#/cobrancas';
+      atualizarIndicadores();
+    } catch (er) { toast(er.message, true); bt.disabled = false; }
+  };
+}
+
 async function modalPrevia(cobId) {
   const p = await api(`/cobrancas/${cobId}/previa`);
   abrirModal(`<div class="modal-topo"><h2>Mensagem · ${esc(p.etapa_nome)}</h2><button class="fechar" data-fechar>×</button></div>
@@ -625,7 +736,8 @@ async function modalFichaCliente(id) {
           <td>${pc.status === 'ativo' ? (pc.pago ? '<span class="tag pago">Ativo</span>' : '<span class="tag pendente">Ativo · pagamento pendente</span>') : pc.status === 'cancelado' ? '<span class="tag">Cancelado</span>' : '<span class="tag">Encerrado</span>'}</td>
           <td class="num">${pc.status === 'ativo' ? `<button class="btn mini" data-cancelar-pac="${pc.id}" title="Cancelar pacote" aria-label="Cancelar pacote">${ic('fechar')}</button>` : ''}</td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted pequeno" style="margin-bottom:16px">Nenhum pacote vendido para este cliente.</p>'}` : ''}
-      <h3>Cobranças</h3>
+      <div class="cartao-topo" style="padding:0;margin-bottom:8px;border:0"><h3 style="margin:0">Cobranças</h3>
+        <div class="acoes"><button class="btn mini primario" id="nova-cob-cli">${ic('mais')} Nova cobrança</button></div></div>
       <div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Referente a</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
       ${c.cobrancas.map((cb) => `<tr><td>${esc(refCobranca(cb, c.forma))}${cb.numero_parcela ? ` <span class="sub2">(${cb.numero_parcela}/${c.parcelas_total})</span>` : ''}${cb.tipo === 'avulsa' ? ' <span class="tag">avulsa</span>' : ''}</td>
         <td>${brData(cb.vencimento)}</td><td class="num">${brl(cb.valor)}</td>
@@ -640,6 +752,7 @@ async function modalFichaCliente(id) {
   ligarAcoesCobranca($('#modal-caixa'), () => modalFichaCliente(id));
   $('#editar-ficha').onclick = () => modalCliente(c, () => rotear());
   $('#lancar-consumo').onclick = () => modalConsumo(c, () => modalFichaCliente(id));
+  $('#nova-cob-cli').onclick = () => modalNovaCobranca(id);
   $$('[data-pix-cli]').forEach((b) => b.onclick = async () => {
     if (b.classList.contains('sel')) return;
     const ligar = b.dataset.pixCli === '1';
@@ -736,7 +849,7 @@ async function pgCobrancas(el) {
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Cobranças</h1><div class="muted">Mensalidades, semanais, parcelas e avulsas do mês.</div></div>
       <div class="acoes"><button class="btn" id="mes-ant" aria-label="Mês anterior">${ic('esquerda')}</button><b style="min-width:140px;text-align:center">${MESES[m - 1]} ${y}</b><button class="btn" id="mes-prox" aria-label="Próximo mês">${ic('direita')}</button>
-      <a class="btn cfg-regua" href="#/config">${ic('whatsapp')} Régua de avisos</a>${CONFIG.asaas_ativo ? `<button class="btn" id="asaas-conferir" title="Pergunta ao Asaas se alguém pagou">${ic('pix')} Conferir pagamentos</button>` : ''}<a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">${ic('baixar')} CSV</a></div></div>
+      <a class="btn cfg-regua" href="#/config">${ic('whatsapp')} Régua de avisos</a>${CONFIG.asaas_ativo ? `<button class="btn" id="asaas-conferir" title="Pergunta ao Asaas se alguém pagou">${ic('pix')} Conferir pagamentos</button>` : ''}<a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">${ic('baixar')} CSV</a><button class="btn primario" id="nova-cob">${ic('mais')} Nova cobrança</button></div></div>
     ${d.anteriores.n ? `<div class="aviso">Há ${d.anteriores.n} cobrança(s) de meses anteriores ainda em aberto (${brl(d.anteriores.v)}). <a href="#" id="ver-atrasadas">Ver lista →</a></div>` : ''}
     <div class="grade g4">
       <div class="cartao kpi"><div class="rotulo">Previsto</div><div class="valor">${brl(r.previsto)}</div><div class="det">${r.qtd} cobrança(s)</div></div>
@@ -767,6 +880,7 @@ async function pgCobrancas(el) {
   };
   $('#f-cob').onchange = (e) => { filtroCob = e.target.value; desenhar(); };
   const mudar = (n) => { const dt = new Date(y, m - 1 + n, 1); mesCob = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`; rotear(); };
+  $('#nova-cob').onclick = () => modalNovaCobranca();
   const ac = $('#asaas-conferir');
   if (ac) ac.onclick = async () => {
     ac.disabled = true;
