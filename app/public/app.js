@@ -451,6 +451,78 @@ async function modalPixCobranca(cobId) {
 // atualiza a lista por trás do modal sem fechá-lo
 function recarregarFundo() { if (location.hash.startsWith('#/cobrancas')) pgCobrancas($('#conteudo')).catch(() => {}); }
 
+// ---------- Importar do Asaas ----------
+async function modalImportarAsaas() {
+  const anoAtual = Number(dataLocal().slice(0, 4));
+  const opcoesAte = [];
+  for (let y = anoAtual; y <= anoAtual + 3; y++) opcoesAte.push(`${y}-12`);
+  abrirModal(`<div class="modal-topo"><h2>Importar do Asaas</h2><button class="fechar" data-fechar>×</button></div>
+    <div class="modal-corpo">
+      <p class="muted pequeno" style="margin-top:0">Traz os clientes e as cobranças que já estão no Asaas. O <b>carnê</b> de cada cliente vira carnê aqui; as parcelas que já existem no Asaas entram ligadas aos boletos de lá (com baixa automática) e o sistema continua as parcelas até o mês escolhido. <b>Nada é cancelado no Asaas.</b></p>
+      <div class="linha">
+        <label>Carnê até<select id="imp-ate">${opcoesAte.map((m) => `<option value="${m}" ${m === '2027-12' ? 'selected' : ''}>dezembro/${m.slice(0, 4)}</option>`).join('')}</select></label>
+        <label>Histórico de pagas<select id="imp-hist"><option value="12">Últimos 12 meses</option><option value="tudo">Tudo</option><option value="nenhum">Nenhum (só em aberto)</option></select></label>
+      </div>
+      <label class="check"><input type="checkbox" id="imp-avisos" checked> Desligar os avisos do próprio Asaas nesses clientes (só a régua do sistema avisa)</label>
+      <div class="acoes" style="margin:10px 0"><button class="btn primario" id="imp-analisar">${ic('check')} Analisar o Asaas</button></div>
+      <div id="imp-res"></div>
+    </div>
+    <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario hidden" id="imp-ok">Importar</button></div>`);
+  let analise = null;
+  const opcoes = () => ({ ate_mes: $('#imp-ate').value, historico: $('#imp-hist').value === '12' ? '12' : $('#imp-hist').value });
+  const linha = (x) => {
+    const k = x.carne;
+    const carne = k ? `<b>${brl(k.valor)}</b> · dia ${k.dia}<div class="sub2">no Asaas: ${k.pagas} paga(s), ${k.abertas} aberta(s) de ${k.parcelas_asaas} · aqui até ${MESES[Number(k.ate.slice(5)) - 1].slice(0, 3).toLowerCase()}/${k.ate.slice(0, 4)} (${k.parcelas_total}x)</div>` : '<span class="muted">sem carnê ativo</span>';
+    const outras = [x.avulsas_abertas ? `${x.avulsas_abertas} em aberto` : '', x.avulsas_pagas ? `${x.avulsas_pagas} paga(s)` : ''].filter(Boolean).join(' · ') || '—';
+    return `<tr class="${x.ja_importado ? 'apagado' : ''}">
+      <td>${x.ja_importado ? '' : `<input type="checkbox" data-imp="${esc(x.asaas_id)}" checked aria-label="Importar ${esc(x.nome)}">`}</td>
+      <td><b>${esc(x.nome)}</b><div class="sub2">${x.telefone ? fone(x.telefone) : 'sem WhatsApp'}${x.cpf_cnpj ? ` · ${x.cpf_cnpj.length === 11 ? 'CPF' : 'CNPJ'} ${esc(x.cpf_cnpj)}` : ' · sem CPF/CNPJ'}</div>
+        ${x.ja_importado ? '<div class="sub2">já importado</div>' : x.avisos.length ? `<div class="sub2" style="color:var(--amarelo)">${ic('alerta', 'ic-in')} ${esc(x.avisos.join('; '))}</div>` : ''}</td>
+      <td>${carne}</td><td>${outras}</td></tr>`;
+  };
+  const desenhar = () => {
+    const a = analise; const r = a.resumo;
+    $('#imp-res').innerHTML = `
+      ${a.ambiente === 'sandbox' ? '<div class="aviso pequeno">Atenção: a chave salva é do <b>ambiente de teste (sandbox)</b>.</div>' : ''}
+      <div class="aviso info pequeno" style="margin-bottom:10px">Encontrei <b>${r.clientes}</b> cliente(s) no Asaas${r.ja_importados ? ` (${r.ja_importados} já importado(s))` : ''}. Vão entrar <b>${r.novos}</b>: ${r.com_carne} com carnê (${r.parcelas_asaas} parcela(s) do Asaas), ${r.avulsas_abertas} cobrança(s) avulsa(s) em aberto e ${r.historico_pagas} paga(s) de histórico.${r.com_aviso ? `<br>${ic('alerta', 'ic-in')} ${r.com_aviso} cliente(s) com algo para conferir (marcado em amarelo).` : ''}</div>
+      ${a.plano.length ? `<div class="tabela-wrap cartao" style="max-height:340px;overflow:auto"><table>
+        <thead><tr><th><input type="checkbox" id="imp-todos" checked aria-label="Marcar todos"></th><th>Cliente</th><th>Carnê</th><th>Outras cobranças</th></tr></thead>
+        <tbody>${a.plano.map(linha).join('')}</tbody></table></div>` : '<p class="muted">Nenhum cliente no Asaas.</p>'}`;
+    const atualizarBotao = () => {
+      const n = $$('[data-imp]:checked').length;
+      $('#imp-ok').textContent = `Importar ${n} cliente(s)`;
+      $('#imp-ok').classList.toggle('hidden', !n);
+    };
+    const todos = $('#imp-todos');
+    if (todos) todos.onchange = () => { $$('[data-imp]').forEach((c) => { c.checked = todos.checked; }); atualizarBotao(); };
+    $$('[data-imp]').forEach((c) => c.onchange = atualizarBotao);
+    atualizarBotao();
+  };
+  $('#imp-analisar').onclick = async () => {
+    const b = $('#imp-analisar'); b.disabled = true; $('#imp-ok').classList.add('hidden');
+    $('#imp-res').innerHTML = '<p class="muted pequeno">Lendo os clientes e as cobranças no Asaas… (pode levar um pouco se forem muitos)</p>';
+    try { analise = await api('/asaas/importar/analisar', { method: 'POST', body: opcoes() }); desenhar(); }
+    catch (e) { $('#imp-res').innerHTML = `<div class="aviso pequeno">${ic('alerta')} ${esc(e.message)}</div>`; }
+    b.disabled = false;
+  };
+  ['#imp-ate', '#imp-hist'].forEach((sel) => { $(sel).onchange = () => { if (analise) $('#imp-analisar').click(); }; });
+  $('#imp-ok').onclick = async () => {
+    const somente = $$('[data-imp]:checked').map((c) => c.dataset.imp);
+    const desligar = $('#imp-avisos').checked;
+    if (!(await confirmar('Importar do Asaas?', `Vou cadastrar ${somente.length} cliente(s) com os carnês e as cobranças. Nada é apagado nem cancelado no Asaas.`, 'Importar'))) return modalImportarAsaas();
+    abrirModal(`<div class="modal-topo"><h2>Importando…</h2></div><div class="modal-corpo"><p class="muted">Cadastrando clientes e cobranças. Não feche esta janela.</p></div>`);
+    try {
+      const r = await api('/asaas/importar', { method: 'POST', body: { ...opcoes(), desligar_avisos: desligar, somente } });
+      abrirModal(`<div class="modal-topo"><h2>Importação concluída</h2><button class="fechar" data-fechar>×</button></div>
+        <div class="modal-corpo"><div class="aviso ok">${ic('check')} ${r.clientes} cliente(s) cadastrado(s), ${r.carnes} carnê(s), ${r.parcelas} parcela(s) do Asaas, ${r.avulsas} avulsa(s) em aberto e ${r.pagas} pagamento(s) no histórico.${r.avisos_desligados ? ` Avisos do Asaas desligados em ${r.avisos_desligados} cliente(s).` : ''}</div>
+        ${r.erros.length ? `<div class="aviso pequeno"><b>Para conferir:</b><br>${r.erros.map(esc).join('<br>')}</div>` : ''}
+        <p class="muted pequeno">As parcelas em aberto seguem a régua de avisos daqui, com o boleto/Pix do Asaas. Quando quiser, a gente cancela os boletos antigos no Asaas.</p></div>
+        <div class="modal-rodape"><a class="btn primario" href="#/clientes" data-fechar>Ver clientes</a></div>`);
+      atualizarIndicadores();
+    } catch (e) { toast(e.message, true); fecharModal(); }
+  };
+}
+
 // ---------- Nova cobrança (avulsa ou parcelada) ----------
 async function modalNovaCobranca(clientePre) {
   let lista = [];
@@ -1208,6 +1280,7 @@ async function pgConfig(el) {
           <div class="acoes" style="margin-bottom:10px">
             <button type="button" class="btn" id="asaas-testar">${ic('check')} Testar conexão</button>
             <button type="button" class="btn" id="asaas-webhook">${ic('link')} Ativar aviso de pagamento</button>
+            <button type="button" class="btn" id="asaas-importar">${ic('baixar')} Importar clientes do Asaas</button>
             <button type="button" class="btn mini perigo hidden" id="asaas-remover">Remover chave</button>
           </div>
           <div id="asaas-res"></div>
@@ -1335,6 +1408,11 @@ async function pgConfig(el) {
       const r = await api('/asaas/webhook', { method: 'POST' });
       box.innerHTML = `<div class="aviso ok pequeno">${ic('check')} Pronto! O Asaas vai avisar os pagamentos em <code>${esc(r.url)}</code>.</div>`;
     } catch (e) { box.innerHTML = `<div class="aviso pequeno">${ic('alerta')} ${esc(e.message)}</div>`; }
+  };
+  $('#asaas-importar').onclick = async () => {
+    if (!CONFIG.asaas_chave_salva) return toast('Cole a chave do Asaas e salve antes de importar.', true);
+    await salvarEAsaas().catch(() => {});
+    modalImportarAsaas();
   };
   $('#asaas-remover').onclick = async () => {
     if (!(await confirmar('Remover a chave do Asaas?', 'As próximas cobranças voltam a usar o Pix direto. As que já foram para o Asaas continuam lá.', 'Remover', true))) return rotear();

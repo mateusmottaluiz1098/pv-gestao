@@ -693,6 +693,21 @@ app.post('/api/asaas/webhook', pode('configuracoes'), rota(async (req, res) => {
   const base = process.env.URL_PUBLICA || c._url_publica || `${req.protocol}://${req.get('host')}`;
   try { res.json(await ASAAS.configurarWebhook(base)); } catch (e) { throw erro(400, e.message); }
 }));
+// importar clientes e cobranças que já estão no Asaas
+const IMP = require('./asaas-importar');
+const opcoesImport = (b) => ({
+  ateMes: /^\d{4}-\d{2}$/.test(b.ate_mes || '') ? b.ate_mes : '2027-12',
+  mesesHistorico: b.historico === 'tudo' ? null : b.historico === 'nenhum' ? 0 : 12,
+});
+app.post('/api/asaas/importar/analisar', pode('configuracoes'), rota(async (req, res) => {
+  try { res.json(IMP.resumoParaTela(await IMP.analisar(opcoesImport(req.body || {})))); } catch (e) { throw erro(400, e.message); }
+}));
+app.post('/api/asaas/importar', pode('configuracoes'), rota(async (req, res) => {
+  const b = req.body || {};
+  try {
+    res.json(await IMP.importar({ ...opcoesImport(b), desligarAvisos: b.desligar_avisos !== false, somente: Array.isArray(b.somente) ? b.somente.map(String) : null }));
+  } catch (e) { throw erro(400, e.message); }
+}));
 app.get('/api/asaas/saldo', pode('financeiro'), rota(async (req, res) => {
   res.json(await ASAAS.saldo(req.query.forcar === '1'));
 }));

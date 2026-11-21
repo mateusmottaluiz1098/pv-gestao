@@ -451,3 +451,6 @@ body[data-pg="agenda"] .ag-resumo { padding: 7px 14px; }
 .topo-saldo-erro { color: var(--vermelho); }
 .topo-saldo + #topo-data { margin-left: 0; }
 @media (max-width: 760px) { .topo-saldo { margin-right: 0; padding: 4px 9px; } .topo-saldo-rot { display: none; } }
+
+/* Importar do Asaas */
+tr.apagado td { opacity: .5; }
