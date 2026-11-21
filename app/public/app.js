@@ -509,10 +509,11 @@ async function modalImportarAsaas() {
   $('#imp-ok').onclick = async () => {
     const somente = $$('[data-imp]:checked').map((c) => c.dataset.imp);
     const desligar = $('#imp-avisos').checked;
+    const opts = opcoes(); // lê antes: a confirmação troca a janela
     if (!(await confirmar('Importar do Asaas?', `Vou cadastrar ${somente.length} cliente(s) com os carnês e as cobranças. Nada é apagado nem cancelado no Asaas.`, 'Importar'))) return modalImportarAsaas();
     abrirModal(`<div class="modal-topo"><h2>Importando…</h2></div><div class="modal-corpo"><p class="muted">Cadastrando clientes e cobranças. Não feche esta janela.</p></div>`);
     try {
-      const r = await api('/asaas/importar', { method: 'POST', body: { ...opcoes(), desligar_avisos: desligar, somente } });
+      const r = await api('/asaas/importar', { method: 'POST', body: { ...opts, desligar_avisos: desligar, somente } });
       abrirModal(`<div class="modal-topo"><h2>Importação concluída</h2><button class="fechar" data-fechar>×</button></div>
         <div class="modal-corpo"><div class="aviso ok">${ic('check')} ${r.clientes} cliente(s) cadastrado(s), ${r.carnes} carnê(s), ${r.parcelas} parcela(s) do Asaas, ${r.avulsas} avulsa(s) em aberto e ${r.pagas} pagamento(s) no histórico.${r.avisos_desligados ? ` Avisos do Asaas desligados em ${r.avisos_desligados} cliente(s).` : ''}</div>
         ${r.erros.length ? `<div class="aviso pequeno"><b>Para conferir:</b><br>${r.erros.map(esc).join('<br>')}</div>` : ''}
