@@ -1349,6 +1349,7 @@ async function pgConfig(el) {
             <button type="button" class="btn" id="asaas-testar">${ic('check')} Testar conexão</button>
             <button type="button" class="btn" id="asaas-webhook">${ic('link')} Ativar aviso de pagamento</button>
             <button type="button" class="btn" id="asaas-importar">${ic('baixar')} Importar clientes do Asaas</button>
+            <button type="button" class="btn" id="asaas-avisos" title="Só a régua do sistema avisa os clientes">${ic('whatsapp')} Desligar avisos do Asaas</button>
             <button type="button" class="btn mini perigo hidden" id="asaas-remover">Remover chave</button>
           </div>
           <div id="asaas-res"></div>
@@ -1481,6 +1482,16 @@ async function pgConfig(el) {
     if (!CONFIG.asaas_chave_salva) return toast('Cole a chave do Asaas e salve antes de importar.', true);
     await salvarEAsaas().catch(() => {});
     modalImportarAsaas();
+  };
+  $('#asaas-avisos').onclick = async () => {
+    if (!CONFIG.asaas_chave_salva) return toast('Cole a chave do Asaas e salve antes.', true);
+    const box = $('#asaas-res');
+    box.innerHTML = '<p class="muted pequeno">Conferindo os clientes no Asaas…</p>';
+    try {
+      const r = await api('/asaas/desligar-avisos', { method: 'POST' });
+      box.innerHTML = `<div class="aviso ok pequeno">${ic('check')} Avisos do Asaas desligados: ${r.desligados} agora, ${r.ja_estavam} já estavam (de ${r.total} cliente(s) ligados ao Asaas)${r.nao_encontrados ? `, ${r.nao_encontrados} não encontrado(s) no Asaas` : ''}. Os clientes novos já são criados com os avisos desligados.</div>`
+        + (r.erros.length ? `<div class="aviso pequeno">${r.erros.map(esc).join('<br>')}</div>` : '');
+    } catch (e) { box.innerHTML = `<div class="aviso pequeno">${ic('alerta')} ${esc(e.message)}</div>`; }
   };
   $('#asaas-remover').onclick = async () => {
     if (!(await confirmar('Remover a chave do Asaas?', 'As próximas cobranças voltam a usar o Pix direto. As que já foram para o Asaas continuam lá.', 'Remover', true))) return rotear();

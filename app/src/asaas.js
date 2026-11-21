@@ -354,6 +354,29 @@ async function testar() {
   return { ok: true, ambiente: ci.ambiente, saldo: saldo.balance, chaves_pix: chavesPix };
 }
 
+// Desliga os avisos do próprio Asaas (e-mail/SMS/WhatsApp deles) em todos os clientes ligados ao Asaas,
+// para só a régua do PV Gestão avisar. Confere um por um e só altera quem ainda está ligado.
+async function desligarAvisosTodos() {
+  const ci = await conta();
+  if (!ci.chave) throw new ErroAsaas('Cadastre a chave do Asaas antes.', 400);
+  const { rows } = await q('SELECT id, nome, asaas_cliente_id FROM clientes WHERE asaas_cliente_id IS NOT NULL ORDER BY id');
+  const r = { total: rows.length, ja_estavam: 0, desligados: 0, nao_encontrados: 0, erros: [] };
+  for (const c of rows) {
+    try {
+      const cli = await chamar('GET', `/customers/${c.asaas_cliente_id}`, null, ci);
+      if (cli.deleted) { r.nao_encontrados++; continue; }
+      if (cli.notificationDisabled === true) { r.ja_estavam++; continue; }
+      await chamar('PUT', `/customers/${c.asaas_cliente_id}`, { notificationDisabled: true }, ci);
+      r.desligados++;
+    } catch (e) {
+      if (e.status === 404) r.nao_encontrados++;
+      else r.erros.push(`${c.nome}: ${e.message}`);
+      if (e.status === 401) break;
+    }
+  }
+  return r;
+}
+
 // saldo da conta (guardado por 2 minutos para não ficar consultando o Asaas)
 let saldoCache = null;
 async function saldo(forcar) {
@@ -394,5 +417,5 @@ async function configurarWebhook(urlBase) {
 
 module.exports = {
   iniciar, tick, conta, chamar, usaAsaas, modoEfetivo, definirModoCobranca, definirCliente, soltarCobranca, pixDaCobranca, registrarErro, receberWebhook, confirmarPagamento,
-  testar, configurarWebhook, saldo, docValido, soDigitos, ambienteDaChave, gerarToken, ErroAsaas,
+  testar, configurarWebhook, saldo, desligarAvisosTodos, docValido, soDigitos, ambienteDaChave, gerarToken, ErroAsaas,
 };

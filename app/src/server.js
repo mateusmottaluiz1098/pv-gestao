@@ -788,6 +788,9 @@ app.post('/api/asaas/importar', pode('configuracoes'), rota(async (req, res) => 
     res.json(await IMP.importar({ ...opcoesImport(b), desligarAvisos: b.desligar_avisos !== false, somente: Array.isArray(b.somente) ? b.somente.map(String) : null }));
   } catch (e) { throw erro(400, e.message); }
 }));
+app.post('/api/asaas/desligar-avisos', pode('configuracoes'), rota(async (req, res) => {
+  try { res.json(await ASAAS.desligarAvisosTodos()); } catch (e) { throw erro(400, e.message); }
+}));
 app.get('/api/asaas/saldo', pode('financeiro'), rota(async (req, res) => {
   res.json(await ASAAS.saldo(req.query.forcar === '1'));
 }));
