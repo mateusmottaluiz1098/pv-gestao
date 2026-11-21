@@ -269,6 +269,22 @@ async function confirmarPagamento(pg) {
   return true;
 }
 
+// Pergunta ao Asaas, na hora, se a cobrança já foi paga (antes de mandar mensagem).
+// Se foi, dá a baixa aqui e devolve true. Se o Asaas não responder, devolve false (segue o fluxo normal).
+async function pagoNoAsaas(cb) {
+  if (!cb || !cb.asaas_id || cb.asaas_status === 'pago') return false;
+  try {
+    const ci = await conta();
+    if (!ci.chave) return false;
+    const pg = await chamar('GET', `/payments/${cb.asaas_id}`, null, ci);
+    if (!PAGO.includes(pg.status)) return false;
+    await confirmarPagamento(pg);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // tokens do webhook: 32+ caracteres, sem sequências repetidas
 function gerarToken() {
   let t;
@@ -416,6 +432,6 @@ async function configurarWebhook(urlBase) {
 }
 
 module.exports = {
-  iniciar, tick, conta, chamar, usaAsaas, modoEfetivo, definirModoCobranca, definirCliente, soltarCobranca, pixDaCobranca, registrarErro, receberWebhook, confirmarPagamento,
+  iniciar, tick, conta, chamar, usaAsaas, pagoNoAsaas, modoEfetivo, definirModoCobranca, definirCliente, soltarCobranca, pixDaCobranca, registrarErro, receberWebhook, confirmarPagamento,
   testar, configurarWebhook, saldo, desligarAvisosTodos, docValido, soDigitos, ambienteDaChave, gerarToken, ErroAsaas,
 };

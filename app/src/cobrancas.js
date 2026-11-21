@@ -231,6 +231,13 @@ async function registrar(msg) {
 async function enviarCobranca(cobranca, cliente, etapa) {
   const c = await cfg.obter();
   const numero = U.normalizarTelefone(cliente.telefone);
+  // nunca cobrar quem já pagou: confere de novo no banco e, se estiver no Asaas, pergunta lá na hora
+  const { rows: agora } = await q('SELECT * FROM cobrancas WHERE id = $1', [cobranca.id]);
+  if (!agora[0] || agora[0].status !== 'aberto') return { ok: false, pulado: true, erro: 'Esta cobrança não está mais em aberto (já paga ou cancelada). Nada foi enviado.' };
+  cobranca = agora[0];
+  if (cobranca.asaas_id && await require('./asaas').pagoNoAsaas(cobranca)) {
+    return { ok: false, pulado: true, erro: 'O cliente já pagou no Asaas. A baixa foi feita agora e nada foi enviado.' };
+  }
   let texto = '';
   try {
     if (!U.telefoneValido(numero)) throw new Error('Telefone inválido');
@@ -278,11 +285,17 @@ async function montarFila(dataRef = U.hoje()) {
     [dataRef]
   );
   const clienteHoje = new Set(hojeRows.map((r) => r.cliente_id));
+  // quem mandou comprovante (PDF) que ainda não foi conferido não recebe cobrança até alguém conferir
+  const { rows: compRows } = await q(
+    `SELECT DISTINCT cliente_id FROM comprovantes cp WHERE status = 'pendente' AND cliente_id IS NOT NULL
+       AND recebido_em > now() - interval '15 days' AND (cp.mimetype ILIKE '%pdf%' OR cp.nome_arquivo ILIKE '%.pdf')`
+  );
+  const comComprovante = new Set(compRows.map((r) => r.cliente_id));
 
   const fila = [];
   const clientesNaFila = new Set();
   for (const cb of rows) {
-    if (clientesNaFila.has(cb.cliente_id) || clienteHoje.has(cb.cliente_id)) continue;
+    if (clientesNaFila.has(cb.cliente_id) || clienteHoje.has(cb.cliente_id) || comComprovante.has(cb.cliente_id)) continue;
     const diff = U.diffDias(dataRef, cb.vencimento); // >0 = atrasado
     const elegiveis = etapas.filter((e) => e.dias <= diff);
     if (!elegiveis.length) continue;
@@ -305,7 +318,7 @@ function nomeEtapa(dias) {
 }
 
 // Execução em segundo plano
-const execucao = { rodando: false, parar: false, total: 0, feitos: 0, enviados: 0, erros: 0, atual: null, inicio: null, fim: null, ultimoErro: null, origem: null };
+const execucao = { rodando: false, parar: false, total: 0, feitos: 0, enviados: 0, erros: 0, pulados: 0, atual: null, inicio: null, fim: null, ultimoErro: null, origem: null };
 
 function dentroDaJanela(c) {
   const h = U.horaAgora();
@@ -325,7 +338,7 @@ async function executarFila(origem = 'manual') {
   );
   const restante = Math.max(0, Number(c.limite_diario || 60) - rows[0].n);
   const lote = fila.slice(0, restante);
-  Object.assign(execucao, { rodando: true, parar: false, total: lote.length, feitos: 0, enviados: 0, erros: 0, atual: null, inicio: new Date().toISOString(), fim: null, ultimoErro: null, origem });
+  Object.assign(execucao, { rodando: true, parar: false, total: lote.length, feitos: 0, enviados: 0, erros: 0, pulados: 0, atual: null, inicio: new Date().toISOString(), fim: null, ultimoErro: null, origem });
   rodarLote(lote, c).catch((e) => { execucao.ultimoErro = e.message; }).finally(() => {
     execucao.rodando = false; execucao.atual = null; execucao.fim = new Date().toISOString();
   });
@@ -342,7 +355,9 @@ async function rodarLote(lote, c) {
     const { rows: cl } = await q('SELECT * FROM clientes WHERE id = $1', [item.cliente_id]);
     if (cb[0] && cl[0] && cb[0].status === 'aberto') {
       const r = await enviarCobranca(cb[0], cl[0], etapas[item.etapa]);
-      if (r.ok) execucao.enviados++; else { execucao.erros++; execucao.ultimoErro = `${item.nome}: ${r.erro}`; }
+      if (r.ok) execucao.enviados++;
+      else if (r.pulado) execucao.pulados++; // já estava pago: não é erro
+      else { execucao.erros++; execucao.ultimoErro = `${item.nome}: ${r.erro}`; }
     }
     execucao.feitos++;
     if (i < lote.length - 1 && !execucao.parar) {

@@ -469,7 +469,7 @@ function desenharExecucao(ex, tamFila) {
     box.dataset.rodou = '1';
   } else {
     if (box.dataset.rodou === '1') { box.dataset.rodou = ''; rotear(); return; }
-    box.innerHTML = ex.fim ? `<div style="padding:10px 18px;border-bottom:1px solid var(--borda)" class="muted pequeno">Última execução: ${ex.enviados} enviada(s), ${ex.erros} erro(s)${ex.ultimoErro ? ` — ${esc(ex.ultimoErro)}` : ''}</div>` : '';
+    box.innerHTML = ex.fim ? `<div style="padding:10px 18px;border-bottom:1px solid var(--borda)" class="muted pequeno">Última execução: ${ex.enviados} enviada(s), ${ex.erros} erro(s)${ex.pulados ? `, ${ex.pulados} já estavam pagas (não enviadas)` : ''}${ex.ultimoErro ? ` — ${esc(ex.ultimoErro)}` : ''}</div>` : '';
     ac.innerHTML = tamFila ? `<button class="btn primario" id="rodar-fila">${ic('enviar')} Enviar fila agora</button>` : '';
     const b = $('#rodar-fila');
     if (b) b.onclick = async () => {
