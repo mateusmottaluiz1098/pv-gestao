@@ -707,7 +707,7 @@ let statusComp = 'pendente';
 async function pgComprovantes(el) {
   const lista = await api(`/comprovantes?status=${statusComp}`);
   el.innerHTML = `
-    <div class="cabecalho"><div><h1>Comprovantes</h1><div class="muted">Imagens e PDFs que os clientes mandam pelo WhatsApp. Confira no app do banco e confirme.</div></div>
+    <div class="cabecalho"><div><h1>Comprovantes</h1><div class="muted">Comprovantes em PDF que os clientes mandam pelo WhatsApp. Confira no app do banco e confirme.</div></div>
       <div class="acoes"><select id="f-comp" style="width:auto;margin:0"><option value="pendente">Para conferir</option><option value="aceito">Confirmados</option><option value="recusado">Recusados</option></select></div></div>
     ${lista.length ? `<div class="comp-grade">${lista.map((cp) => `
       <div class="cartao">
@@ -722,7 +722,7 @@ async function pgComprovantes(el) {
             : `<div style="margin-top:8px"><span class="tag ${cp.status}">${cp.status === 'aceito' ? 'Confirmado' : 'Recusado'}</span> ${cp.vencimento ? `<span class="muted pequeno">venc. ${brData(cp.vencimento)} · ${brl(cp.valor)}</span>` : ''}</div>`}
         </div>
       </div>`).join('')}</div>`
-      : `<div class="cartao vazio"><b>${statusComp === 'pendente' ? 'Nenhum comprovante para conferir' : 'Nada por aqui'}</b>Quando um cliente mandar foto ou PDF do comprovante no WhatsApp, ele aparece aqui.</div>`}`;
+      : `<div class="cartao vazio"><b>${statusComp === 'pendente' ? 'Nenhum comprovante para conferir' : 'Nada por aqui'}</b>Quando um cliente mandar o comprovante em PDF no WhatsApp, ele aparece aqui.</div>`}`;
   $('#f-comp').value = statusComp;
   $('#f-comp').onchange = (e) => { statusComp = e.target.value; rotear(); };
   $$('[data-abrir]').forEach((d) => d.onclick = () => window.open(`/api/comprovantes/${d.dataset.abrir}/arquivo`, '_blank'));

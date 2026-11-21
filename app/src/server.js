@@ -122,14 +122,15 @@ async function tratarWebhook(body) {
     }
     if (!cliente) continue; // ignora quem não é cliente
 
-    // só guarda comprovantes (imagem/PDF); conversas comuns não são salvas
-    if (!img && !doc) continue;
+    // só guarda comprovantes em PDF; imagens e conversas comuns não são salvas
+    const ehPdf = doc && (/pdf/i.test(doc.mimetype || '') || /\.pdf$/i.test(doc.fileName || ''));
+    if (!ehPdf) continue;
     let base64 = msg.base64 || d.base64 || null;
     if (!base64) {
       try { base64 = await wa.baixarMidia(d); } catch (e) { console.warn('[webhook] mídia:', e.message); }
     }
-    const mimetype = (img && img.mimetype) || (doc && doc.mimetype) || 'application/octet-stream';
-    const nomeArquivo = (doc && doc.fileName) || (img ? 'comprovante.jpg' : 'arquivo');
+    const mimetype = 'application/pdf';
+    const nomeArquivo = doc.fileName || 'comprovante.pdf';
 
     // cobrança em aberto mais antiga do cliente
     const { rows: abertas } = await q(
@@ -254,7 +255,7 @@ app.get('/api/painel', rota(async (req, res) => {
     q("SELECT COUNT(*)::int n, COALESCE(SUM(valor),0) v FROM cobrancas WHERE status='aberto' AND vencimento=$1", [hoje]),
     q("SELECT COUNT(*)::int n, COALESCE(SUM(valor),0) v FROM cobrancas WHERE status='aberto' AND vencimento<$1", [hoje]),
     q("SELECT COUNT(*)::int n, COALESCE(SUM(COALESCE(pago_valor, valor)),0) v FROM cobrancas WHERE status='pago' AND pago_em >= $1", [mes]),
-    q("SELECT COUNT(*)::int n FROM comprovantes WHERE status='pendente'"),
+    q("SELECT COUNT(*)::int n FROM comprovantes cp WHERE status='pendente' AND (cp.mimetype ILIKE '%pdf%' OR cp.nome_arquivo ILIKE '%.pdf')"),
     q("SELECT COUNT(*)::int n FROM mensagens WHERE direcao='saida' AND status='enviado' AND (criado_em AT TIME ZONE 'America/Sao_Paulo')::date=$1", [hoje]),
   ]);
   const previstoMes = await q("SELECT COALESCE(SUM(valor),0) v FROM cobrancas WHERE competencia >= $1 AND competencia < ($1::date + interval '1 month') AND status<>'cancelado'", [mes]);
@@ -484,7 +485,7 @@ app.get('/api/comprovantes', rota(async (req, res) => {
            cp.recebido_em, cp.resolvido_em, (cp.arquivo IS NOT NULL) AS tem_arquivo, cl.nome,
            cb.vencimento, cb.valor, cb.status AS cobranca_status
       FROM comprovantes cp LEFT JOIN clientes cl ON cl.id=cp.cliente_id LEFT JOIN cobrancas cb ON cb.id=cp.cobranca_id
-     WHERE cp.status=$1 ORDER BY cp.recebido_em DESC LIMIT 100`, [status]);
+     WHERE cp.status=$1 AND (cp.mimetype ILIKE '%pdf%' OR cp.nome_arquivo ILIKE '%.pdf') ORDER BY cp.recebido_em DESC LIMIT 100`, [status]);
   for (const r of rows) {
     const ab = await q("SELECT id, vencimento, valor FROM cobrancas WHERE cliente_id=$1 AND status='aberto' ORDER BY vencimento", [r.cliente_id]);
     r.abertas = ab.rows;
