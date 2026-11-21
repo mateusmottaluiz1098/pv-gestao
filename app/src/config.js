@@ -145,7 +145,7 @@ const PADRAO = {
   asaas_webhook_token: '',
   // mensagem do botão WhatsApp (envio manual) para parcela em atraso; vazio = usa a da régua
   msg_manual_ativo: false,
-  msg_manual: 'Olá, {nome}, tudo bem?\n\nNotei que a parcela {parcela} de {valor}, com vencimento em {vencimento}, segue em aberto há {dias_atraso} dias.\n\nSei que imprevistos acontecem. Se precisar, podemos combinar uma nova data ou uma forma que fique melhor para você. É só me responder por aqui.\n\nFico no aguardo. Obrigado!',
+  msg_manual: 'Olá, {nome}, tudo bem?\n\nNotei que a parcela *{parcela}* de *{valor}*, com vencimento em *{vencimento}*, segue em aberto há *{dias_atraso} dias*.\n\nSei que imprevistos acontecem. Se precisar, podemos combinar uma *nova data* ou uma forma que fique melhor para você. É só me responder por aqui.\n\nFico no aguardo. Obrigado!',
   responder_comprovante: true,
   modelo_resposta_comprovante: 'Recebemos o seu comprovante, {primeiro_nome}! 📩\n\nVamos conferir e já damos a baixa por aqui. Obrigado!',
 };
