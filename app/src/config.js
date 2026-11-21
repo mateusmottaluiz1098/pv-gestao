@@ -84,23 +84,23 @@ const PADRAO = {
   regua: [
     {
       id: 'antes2', dias: -2, ativo: true,
-      modelo: 'Olá, {primeiro_nome}! 😊\nPassando para lembrar que o pagamento de {valor} ({descricao}) da {empresa} vence em {vencimento}.\n\nVocê pode pagar pelo Pix abaixo. Depois é só mandar o comprovante aqui mesmo. Obrigado!',
+      modelo: 'Olá, {primeiro_nome}! Tudo bem? 😊\n\nPassando só para lembrar que o pagamento de {valor} ({descricao}) vence em {vencimento}.\n\nDeixei o Pix logo abaixo para facilitar. Se já tiver pago, pode desconsiderar esta mensagem.\n\nObrigado!',
     },
     {
       id: 'dia0', dias: 0, ativo: true,
-      modelo: 'Olá, {primeiro_nome}! 📌 Hoje ({vencimento}) vence o pagamento de {valor} ({descricao}) da {empresa}.\n\nSegue o Pix abaixo. Se já pagou, pode desconsiderar e mandar o comprovante por aqui.',
+      modelo: 'Oi, {primeiro_nome}! Tudo bem?\n\nHoje ({vencimento}) vence o pagamento de {valor} ({descricao}).\n\nO Pix está aqui embaixo, é só copiar e colar no app do banco. Se já pagou, pode desconsiderar. 😉',
     },
     {
       id: 'depois1', dias: 1, ativo: true,
-      modelo: 'Oi, {primeiro_nome}, tudo bem? Não identificamos ainda o pagamento de {valor} ({descricao}) que venceu ontem ({vencimento}).\n\nSegue o Pix para facilitar. Se já pagou, é só mandar o comprovante aqui.',
+      modelo: 'Oi, {primeiro_nome}, tudo bem?\n\nAinda não identificamos o pagamento de {valor} ({descricao}), que venceu ontem ({vencimento}). Deve ter sido só um esquecimento, acontece!\n\nO Pix segue abaixo. Se já pagou, pode desconsiderar.',
     },
     {
       id: 'depois5', dias: 5, ativo: true,
-      modelo: 'Olá, {primeiro_nome}. O pagamento de {valor} ({descricao}) da {empresa} está em aberto há {dias_atraso} dias (venc. {vencimento}).\n\nPodemos contar com o pagamento? Pix abaixo. Qualquer dificuldade, me chama por aqui.',
+      modelo: 'Olá, {primeiro_nome}, tudo bem?\n\nNotei que o pagamento de {valor} ({descricao}), com vencimento em {vencimento}, segue em aberto há {dias_atraso} dias.\n\nSe estiver passando por alguma dificuldade, me conta por aqui que a gente encontra a melhor solução. O Pix segue abaixo.',
     },
     {
       id: 'depois10', dias: 10, ativo: true,
-      modelo: '{primeiro_nome}, seguimos com o pagamento de {valor} ({descricao}) em aberto desde {vencimento} ({dias_atraso} dias).\n\nPor favor, regularize pelo Pix abaixo ou me avise se precisar combinar outra data.',
+      modelo: 'Olá, {primeiro_nome}, tudo bem?\n\nO pagamento de {valor} ({descricao}) está em aberto desde {vencimento}, já são {dias_atraso} dias.\n\nQuero resolver isso com você da melhor forma. Se precisar, podemos combinar uma nova data ou outro jeito que fique melhor para você. É só me responder por aqui.\n\nFico no aguardo. Obrigado!',
     },
   ],
 
@@ -116,7 +116,7 @@ const PADRAO = {
   agenda_msg_cancelado: 'Tudo bem, {primeiro_nome}. Seu horário de {data} às {hora} foi cancelado. Quando quiser remarcar, é só chamar aqui.',
 
   agradecer_pagamento: true,
-  modelo_agradecimento: '✅ Pagamento de {valor} recebido, {primeiro_nome}! Muito obrigado.\n— {empresa}',
+  modelo_agradecimento: 'Recebemos o seu pagamento de {valor}, {primeiro_nome}! 🙌\n\nMuito obrigado pela confiança.\n{empresa}',
 
   modelo_avulso: 'Olá, {primeiro_nome}! 🧾 Segue o valor de {valor} referente a {descricao} na {empresa}.\n\nPode pagar pelo Pix abaixo e mandar o comprovante aqui. Obrigado!',
 
@@ -147,7 +147,7 @@ const PADRAO = {
   msg_manual_ativo: false,
   msg_manual: 'Olá, {nome}, tudo bem?\n\nNotei que a parcela {parcela} de {valor}, com vencimento em {vencimento}, segue em aberto há {dias_atraso} dias.\n\nSei que imprevistos acontecem. Se precisar, podemos combinar uma nova data ou uma forma que fique melhor para você. É só me responder por aqui.\n\nFico no aguardo. Obrigado!',
   responder_comprovante: true,
-  modelo_resposta_comprovante: '📩 Recebemos seu comprovante, {primeiro_nome}! Vamos conferir e já damos baixa. Obrigado!',
+  modelo_resposta_comprovante: 'Recebemos o seu comprovante, {primeiro_nome}! 📩\n\nVamos conferir e já damos a baixa por aqui. Obrigado!',
 };
 
 let cache = null;
