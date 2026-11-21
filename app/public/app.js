@@ -177,7 +177,7 @@ window.addEventListener('hashchange', rotear);
 
 // Esconde botões que o usuário não pode usar (o servidor também bloqueia)
 const ACOES_PERM = {
-  '#novo-cli': 'clientes', '#nova-cob': 'pagamentos', '#nova-cob-cli': 'pagamentos', '[data-editar]': 'clientes', '#editar-ficha': 'clientes', '#excluir-cli': 'clientes',
+  '#novo-cli': 'clientes', '#nova-cob': 'pagamentos', '[data-renovar]': 'clientes', '[data-cob-cli]': 'pagamentos', '#nova-cob-cli': 'pagamentos', '[data-editar]': 'clientes', '#editar-ficha': 'clientes', '#excluir-cli': 'clientes',
   '[data-pagar]': 'pagamentos', '[data-desfazer]': 'pagamentos', '[data-cancelar]': 'pagamentos', '[data-aceitar]': 'pagamentos', '[data-recusar]': 'pagamentos',
   '#rodar-fila': 'envios', '#parar-fila': 'envios', '#enviar-agora': 'envios',
   '#ag-novo': 'agenda', '#ag-com': 'financeiro', '#ag-prof': 'agenda_config', '#ag-serv': 'agenda_config', '.ag-acao': 'agenda',
@@ -357,6 +357,7 @@ async function pgPainel(el) {
         return `<div class="valor">${brl(total)}</div><div class="det">${partes.join(' · ') || 'nenhum pagamento ainda'}</div>`;
       })()}</div>
     </div>
+    ${cartaoSemCarne(d.sem_carne)}
     <div class="grade g2" style="margin-top:14px">
       <div class="cartao">
         <div class="cartao-topo">
@@ -383,11 +384,77 @@ async function pgPainel(el) {
     </div>`;
   $('#novo-cli').onclick = () => modalCliente(null, () => rotear());
   $$('[data-previa]').forEach((b) => b.onclick = () => modalPrevia(b.dataset.previa));
+  ligarSemCarne(d.sem_carne);
   desenharExecucao(ex, d.fila.length);
   timers.push(setInterval(async () => {
     const e = await api('/fila/estado').catch(() => null);
     if (e) desenharExecucao(e, d.fila.length);
   }, 3000));
+}
+
+// ---------- Clientes ativos sem carnê / sem cobrança ----------
+function cartaoSemCarne(sc) {
+  if (!sc || (!sc.total_acabou && !sc.total_acabando)) return '';
+  const mesAno = (iso) => `${MESES[Number(iso.slice(5, 7)) - 1].slice(0, 3).toLowerCase()}/${iso.slice(0, 4)}`;
+  const item = (x) => {
+    let det;
+    if (x.motivo === 'carne_acabou') det = `Carnê terminou${x.fim < HOJE ? '' : ''} em ${mesAno(x.fim)} (${x.parcelas_total}x de ${brl(x.valor)})`;
+    else if (x.motivo === 'carne_acabando') det = `Carnê acaba em ${mesAno(x.fim)} · ${x.abertas} parcela(s) em aberto`;
+    else det = `Sem cobrança em aberto${x.ultimo_venc ? ` · a última venceu em ${brData(x.ultimo_venc)}` : ''}`;
+    const botoes = x.forma === 'carne'
+      ? `<button class="btn mini primario" data-renovar="${x.id}">${ic('mais')} Renovar carnê</button>`
+      : `<button class="btn mini primario" data-cob-cli="${x.id}">${ic('mais')} Nova cobrança</button> <button class="btn mini" data-renovar="${x.id}">Criar carnê</button>`;
+    return `<div class="lista-item"><div class="cresce"><a href="#" data-ver-cli="${x.id}"><b>${esc(x.nome)}</b></a><div class="muted pequeno">${det}</div></div><div class="acoes">${botoes}</div></div>`;
+  };
+  return `<div class="cartao sem-carne" style="margin-top:14px">
+    <div class="cartao-topo"><div><h2>${ic('alerta', 'ic-in')} Clientes ativos sem carnê</h2><div class="muted pequeno">Clientes ativos que ficaram (ou vão ficar) sem cobrança. Renove para não deixar de cobrar.</div></div>
+      ${sc.total_acabou ? `<span class="tag atrasado">${sc.total_acabou} sem cobrança</span>` : ''}</div>
+    ${sc.acabou.map(item).join('')}
+    ${sc.acabando.length ? `<div class="sem-carne-sub">Acabando nos próximos 60 dias${sc.total_acabando > sc.acabando.length ? ` (${sc.total_acabando})` : ''}</div>${sc.acabando.map(item).join('')}` : ''}
+    ${sc.total_acabou > sc.acabou.length ? `<div class="muted pequeno" style="padding:10px 18px">E mais ${sc.total_acabou - sc.acabou.length} cliente(s)…</div>` : ''}
+  </div>`;
+}
+function ligarSemCarne(sc) {
+  if (!sc) return;
+  const todos = [...(sc.acabou || []), ...(sc.acabando || [])];
+  $$('[data-renovar]').forEach((b) => b.onclick = () => modalRenovarCarne(todos.find((x) => x.id == b.dataset.renovar)));
+  $$('[data-cob-cli]').forEach((b) => b.onclick = () => modalNovaCobranca(b.dataset.cobCli));
+  $$('[data-ver-cli]').forEach((a) => a.onclick = (e) => { e.preventDefault(); modalFichaCliente(a.dataset.verCli); });
+}
+function modalRenovarCarne(x) {
+  if (!x) return;
+  const continua = x.motivo === 'carne_acabando';
+  abrirModal(`<form id="f-renovar">
+    <div class="modal-topo"><h2>${x.forma === 'carne' ? 'Renovar carnê' : 'Criar carnê'} · ${esc(x.nome)}</h2><button type="button" class="fechar" data-fechar>×</button></div>
+    <div class="modal-corpo">
+      <p class="muted pequeno" style="margin-top:0">${continua ? `O carnê atual acaba em ${brData(x.fim)}. As novas parcelas entram logo depois, uma por mês.` : 'Um carnê novo começa no próximo dia de vencimento, uma parcela por mês.'}</p>
+      <div class="linha">
+        <label>Parcelas<select name="parcelas">${[3, 6, 10, 12, 18, 24, 36].map((n) => `<option value="${n}" ${n === 12 ? 'selected' : ''}>${n}x</option>`).join('')}</select></label>
+        <label>Valor da parcela (R$)<input name="valor" inputmode="decimal" value="${x.valor ? String(x.valor).replace('.', ',') : ''}" placeholder="0,00"></label>
+      </div>
+      <div class="linha">
+        <label>Dia do vencimento<input name="dia" type="number" min="1" max="31" value="${x.dia_vencimento || Number(String(x.fim || x.ultimo_venc || HOJE).slice(8, 10)) || 10}"></label>
+        ${continua ? '<span></span>' : `<label>1ª parcela em<input name="inicio" type="date"><div class="ajuda">Em branco: no próximo dia de vencimento.</div></label>`}
+      </div>
+      <div class="previa pequeno" id="ren-resumo"></div>
+    </div>
+    <div class="modal-rodape"><button type="button" class="btn" data-fechar>Cancelar</button><button class="btn primario" id="ren-ok">${x.forma === 'carne' ? 'Renovar' : 'Criar carnê'}</button></div>
+  </form>`);
+  const f = $('#f-renovar');
+  const resumo = () => {
+    const v = Number(String(f.valor.value).includes(',') ? f.valor.value.replace(/\./g, '').replace(',', '.') : f.valor.value) || 0;
+    $('#ren-resumo').innerHTML = v > 0 ? `${f.parcelas.value} parcela(s) de <b>${brl(v)}</b> (total ${brl(v * Number(f.parcelas.value))}), todo dia ${f.dia.value}.` : 'Informe o valor da parcela.';
+  };
+  f.oninput = resumo; f.onchange = resumo; resumo();
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    $('#ren-ok').disabled = true;
+    try {
+      const r = await api(`/clientes/${x.id}/renovar-carne`, { method: 'POST', body: { parcelas: f.parcelas.value, valor: f.valor.value, dia: f.dia.value, inicio: f.inicio ? f.inicio.value : '' } });
+      toast(r.novo ? `Carnê criado: ${r.cliente.parcelas_total}x a partir de ${brData(r.cliente.primeiro_vencimento)} ✓` : `Carnê renovado: agora ${r.cliente.parcelas_total} parcelas ✓`);
+      fecharModal(); rotear();
+    } catch (er) { toast(er.message, true); $('#ren-ok').disabled = false; }
+  };
 }
 
 function desenharExecucao(ex, tamFila) {

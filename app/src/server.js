@@ -265,6 +265,7 @@ app.get('/api/painel', rota(async (req, res) => {
     q("SELECT COUNT(*)::int n FROM mensagens WHERE direcao='saida' AND status='enviado' AND (criado_em AT TIME ZONE 'America/Sao_Paulo')::date=$1", [hoje]),
   ]);
   const previstoMes = await q("SELECT COALESCE(SUM(valor),0) v FROM cobrancas WHERE competencia >= $1 AND competencia < ($1::date + interval '1 month') AND status<>'cancelado'", [mes]);
+  const semCarne = await clientesSemCobranca();
   const fila = await C.montarFila();
   const c = await cfg.obter();
   const etapas = Object.fromEntries((c.regua || []).map((e) => [e.id, e]));
@@ -287,7 +288,86 @@ app.get('/api/painel', rota(async (req, res) => {
     hora_envio: c.hora_envio,
     ultima_execucao: await cfg.ultimaExecucao(),
     agenda: await AG.resumoHoje(),
+    sem_carne: semCarne,
   });
+}));
+
+// Clientes ativos que ficaram sem cobrança: carnê acabou (ou vai acabar em 60 dias) e,
+// nos negócios sem agenda, clientes "só avulso" sem nenhuma cobrança em aberto
+async function clientesSemCobranca() {
+  const hoje = U.hoje();
+  const c = await cfg.obter();
+  const usaAvulso = !(c.modulos && c.modulos.agenda);
+  const { rows } = await q(`
+    SELECT cl.id, cl.nome, cl.telefone, cl.forma, cl.valor, cl.parcelas_total, cl.dia_vencimento,
+      (date_trunc('month', cl.primeiro_vencimento) + (GREATEST(cl.parcelas_total, 1) - 1) * interval '1 month')::date AS fim_mes,
+      (SELECT MAX(vencimento) FROM cobrancas WHERE cliente_id=cl.id AND status <> 'cancelado') AS ultimo_venc,
+      (SELECT COUNT(*)::int FROM cobrancas WHERE cliente_id=cl.id AND status='aberto') AS abertas,
+      (SELECT COUNT(*)::int FROM cobrancas WHERE cliente_id=cl.id AND status <> 'cancelado') AS total
+    FROM clientes cl
+    WHERE cl.ativo AND (cl.forma='carne' OR (cl.forma='avulso' AND $1))`, [usaAvulso]);
+  const limite = U.somarDias(hoje, 60);
+  const acabou = []; const acabando = [];
+  for (const r of rows) {
+    if (r.forma === 'carne') {
+      const fim = U.vencimentoNoMes(Number(r.fim_mes.slice(0, 4)), Number(r.fim_mes.slice(5, 7)), r.dia_vencimento);
+      const item = { id: r.id, nome: r.nome, telefone: r.telefone, forma: r.forma, valor: Number(r.valor), parcelas_total: r.parcelas_total, dia_vencimento: r.dia_vencimento, fim, ultimo_venc: r.ultimo_venc };
+      if (!r.abertas && fim <= U.somarDias(hoje, 31)) acabou.push({ ...item, motivo: 'carne_acabou' });
+      else if (fim <= limite) acabando.push({ ...item, motivo: 'carne_acabando', abertas: r.abertas });
+    } else if (!r.abertas && r.total) {
+      acabou.push({ id: r.id, nome: r.nome, telefone: r.telefone, forma: r.forma, valor: Number(r.valor), ultimo_venc: r.ultimo_venc, motivo: 'sem_cobranca' });
+    }
+  }
+  acabou.sort((a, b) => String(a.ultimo_venc || '').localeCompare(String(b.ultimo_venc || '')));
+  acabando.sort((a, b) => a.fim.localeCompare(b.fim));
+  return { acabou: acabou.slice(0, 30), acabando: acabando.slice(0, 30), total_acabou: acabou.length, total_acabando: acabando.length };
+}
+
+// Renova o carnê: se acabou, começa um novo no próximo vencimento; se ainda está rodando, acrescenta parcelas
+app.post('/api/clientes/:id/renovar-carne', pode('clientes'), rota(async (req, res) => {
+  const { rows } = await q('SELECT * FROM clientes WHERE id=$1', [req.params.id]);
+  const cl = rows[0];
+  if (!cl) throw erro(404, 'Cliente não encontrado');
+  const n = Math.min(Math.max(parseInt(req.body.parcelas, 10) || 12, 1), 60);
+  const vTxt = String(req.body.valor ?? '').trim();
+  const valor = Number(vTxt.includes(',') ? vTxt.replace(/\./g, '').replace(',', '.') : vTxt) || Number(cl.valor);
+  if (!(valor > 0)) throw erro(400, 'Informe o valor da parcela');
+  const dia = Math.min(Math.max(parseInt(req.body.dia, 10) || cl.dia_vencimento || 10, 1), 31);
+  const hoje = U.hoje();
+  const { rows: ab } = await q("SELECT COUNT(*)::int n FROM cobrancas WHERE cliente_id=$1 AND status='aberto'", [cl.id]);
+  let fimAtual = null;
+  if (cl.forma === 'carne' && cl.primeiro_vencimento && cl.parcelas_total) {
+    const [py, pm] = cl.primeiro_vencimento.split('-').map(Number);
+    const idx = py * 12 + (pm - 1) + cl.parcelas_total - 1;
+    fimAtual = U.vencimentoNoMes(Math.floor(idx / 12), (idx % 12) + 1, cl.dia_vencimento);
+  }
+  const continua = cl.forma === 'carne' && fimAtual && (ab[0].n > 0 || fimAtual >= hoje);
+  if (continua) {
+    // carnê ainda rodando: só aumenta as parcelas (e o valor das próximas, se mudou)
+    const antes = { ...cl };
+    const { rows: up } = await q('UPDATE clientes SET parcelas_total=parcelas_total+$1, valor=$2, dia_vencimento=$3 WHERE id=$4 RETURNING *', [n, valor, dia, cl.id]);
+    await C.ajustarCobrancasFuturas(up[0], antes);
+  } else {
+    // carnê novo: primeira parcela no próximo dia de vencimento (este mês se ainda não passou)
+    let inicio = /^\d{4}-\d{2}-\d{2}$/.test(req.body.inicio || '') ? req.body.inicio : null;
+    if (!inicio) {
+      const [y, m] = hoje.split('-').map(Number);
+      inicio = U.vencimentoNoMes(y, m, dia);
+      if (inicio < hoje) inicio = m === 12 ? U.vencimentoNoMes(y + 1, 1, dia) : U.vencimentoNoMes(y, m + 1, dia);
+    }
+    if (inicio < hoje) throw erro(400, 'A primeira parcela não pode ser antes de hoje');
+    // se já existe parcela do carnê antigo nesse mês, o novo começa no mês seguinte
+    for (let i = 0; i < 24; i++) {
+      const { rows: ocup } = await q("SELECT 1 FROM cobrancas WHERE cliente_id=$1 AND tipo='recorrente' AND competencia=$2", [cl.id, inicio.slice(0, 7) + '-01']);
+      if (!ocup[0]) break;
+      const [y, m] = inicio.split('-').map(Number);
+      inicio = m === 12 ? U.vencimentoNoMes(y + 1, 1, dia) : U.vencimentoNoMes(y, m + 1, dia);
+    }
+    await q("UPDATE clientes SET forma='carne', valor=$1, dia_vencimento=$2, primeiro_vencimento=$3, parcelas_total=$4, ativo=TRUE WHERE id=$5", [valor, dia, inicio, n, cl.id]);
+  }
+  await C.gerarCobrancas(cl.id);
+  const { rows: depois } = await q('SELECT * FROM clientes WHERE id=$1', [cl.id]);
+  res.json({ ok: true, novo: !continua, cliente: depois[0] });
 }));
 
 // ---------- Clientes ----------
