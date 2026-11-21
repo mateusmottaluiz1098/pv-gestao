@@ -545,7 +545,7 @@ app.get('/api/cobrancas/:id/previa', rota(async (req, res) => {
   const etapa = await etapaPara(rows[0]);
   const pix = await C.pixDaCobranca(rows[0], cl[0]);
   const texto = await C.renderizar(etapa.modelo, cl[0], rows[0], { link: pix && pix.link });
-  res.json({ texto, pix: pix && pix.codigo, asaas: !!(pix && pix.asaas), etapa: etapa.id, etapa_nome: C.nomeEtapa(etapa.dias), ...(await infoModo(rows[0].id, cl[0])) });
+  res.json({ texto, pix: pix && pix.codigo, asaas: !!(pix && pix.asaas), etapa: etapa.id, etapa_nome: etapa.nome || C.nomeEtapa(etapa.dias), ...(await infoModo(rows[0].id, cl[0])) });
 }));
 
 async function etapaPara(cb) {
@@ -553,6 +553,8 @@ async function etapaPara(cb) {
   const etapas = (c.regua || []).filter((e) => e.ativo).sort((a, b) => a.dias - b.dias);
   if (!etapas.length) throw erro(400, 'Nenhuma etapa da régua está ativa');
   const diff = U.diffDias(U.hoje(), cb.vencimento);
+  // envio manual de parcela em atraso: mensagem própria, se estiver ligada
+  if (c.msg_manual_ativo && String(c.msg_manual || '').trim() && diff > 0) return { id: 'manual', dias: diff, modelo: c.msg_manual, nome: 'Cobrança manual (em atraso)' };
   const eleg = etapas.filter((e) => e.dias <= diff);
   return eleg.length ? eleg[eleg.length - 1] : etapas[0];
 }

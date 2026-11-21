@@ -1191,7 +1191,7 @@ const NOMES_MODULO = {
 // organiza os quadros da configuração em abas (o formulário continua um só)
 const ABAS_CFG = [
   ['negocio', 'Negócio', 'painel', /^Negócio$/i],
-  ['cobranca', 'Régua de avisos e Pix', 'whatsapp', /Empresa|Régua|Envio automático|Após o pagamento|comprovante|avulsa/i],
+  ['cobranca', 'Régua de avisos e Pix', 'whatsapp', /Empresa|Régua|Envio automático|Envio manual|Após o pagamento|comprovante|avulsa/i],
   ['asaas', 'Pix automático (Asaas)', 'pix', /Asaas/i],
   ['agenda', 'Agenda', 'agenda', /^Agenda$|Lista de espera/i],
   ['online', 'Agendamento online', 'link', /Agendamento online/i],
@@ -1284,6 +1284,13 @@ async function pgConfig(el) {
             <label>Não enviar depois de<input type="time" name="janela_fim" value="${esc(c.janela_fim)}"></label></div>
           <label>Tolerância de etapa (dias)<input type="number" name="tolerancia_dias" min="0" value="${c.tolerancia_dias}"><div class="ajuda">Quantos dias depois do dia da etapa ela ainda pode ser enviada.</div></label>
           <div class="aviso info pequeno">O envio roda sozinho no servidor, todo dia no horário escolhido, respeitando o limite e os intervalos acima.</div>
+        </div>
+        <div class="cartao pad" style="margin-bottom:14px">
+          <h3>Envio manual (botão WhatsApp)</h3>
+          <p class="muted pequeno" style="margin-top:0">Mensagem usada quando você manda a cobrança pelo botão <b>WhatsApp</b> em Clientes ou Cobranças e a parcela já está <b>em atraso</b>. Antes do vencimento continua indo a mensagem da régua.</p>
+          <label class="check"><input type="checkbox" name="msg_manual_ativo" ${c.msg_manual_ativo ? 'checked' : ''}> Usar esta mensagem no envio manual de parcela em atraso</label>
+          <label>Mensagem<textarea name="msg_manual" style="min-height:150px">${esc(c.msg_manual)}</textarea>
+            <div class="ajuda">Use {nome}, {primeiro_nome}, {parcela}, {valor}, {vencimento}, {dias_atraso}, {descricao}, {link_pagamento}… O Pix vai junto, como na régua.</div></label>
         </div>
         <div class="cartao pad" style="margin-bottom:14px">
           <h3>Após o pagamento</h3>

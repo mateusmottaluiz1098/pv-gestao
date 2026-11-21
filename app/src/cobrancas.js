@@ -180,7 +180,8 @@ async function renderizar(modelo, cliente, cobranca, extra = {}) {
     qtd_aberto: String(ab.qtd),
     link_pagamento: extra.link || '',
   };
-  return String(modelo || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+  // variável vazia (ex.: {parcela} em cobrança avulsa) não deixa espaço sobrando
+  return String(modelo || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)).replace(/[ \t]{2,}/g, ' ').replace(/ ([,.!?])/g, '$1');
 }
 
 // Pix da cobrança: pelo Asaas (QR dinâmico, baixa automática) quando ligado para o cliente;
