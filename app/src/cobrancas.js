@@ -178,12 +178,34 @@ async function renderizar(modelo, cliente, cobranca, extra = {}) {
     descricao: descricaoCobranca(cobranca, cliente),
     total_aberto: U.brl(ab.total),
     qtd_aberto: String(ab.qtd),
+    link_pagamento: extra.link || '',
   };
   return String(modelo || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
 }
 
+// Pix da cobrança: pelo Asaas (QR dinâmico, baixa automática) quando ligado para o cliente;
+// senão (ou se o Asaas falhar) o Pix direto com a chave da empresa
 async function pixDaCobranca(cobranca, cliente) {
   const c = await cfg.obter();
+  if (cliente && cliente.cpf_cnpj === undefined && cobranca.cliente_id) {
+    const { rows } = await q('SELECT * FROM clientes WHERE id = $1', [cobranca.cliente_id]);
+    if (rows[0]) cliente = rows[0];
+  }
+  if (cliente && cobranca.status !== 'pago' && cobranca.status !== 'cancelado') {
+    const ASAAS = require('./asaas');
+    const u = await ASAAS.usaAsaas(cliente);
+    if (u.usa) {
+      try {
+        const p = await ASAAS.pixDaCobranca(cobranca, cliente, u.ci);
+        return { codigo: p.codigo, qr: await qrDataUrl(p.codigo), cliente: cliente.nome, link: p.link, asaas: true };
+      } catch (e) {
+        console.warn(`[asaas] cobrança ${cobranca.id}:`, e.message);
+        await ASAAS.registrarErro(cobranca.id, e.message);
+      }
+    } else if (u.ci.ligado && u.motivo) {
+      await ASAAS.registrarErro(cobranca.id, u.motivo);
+    }
+  }
   if (!c.pix_chave) return null;
   const codigo = gerarPix({
     tipoChave: c.pix_tipo,
@@ -193,7 +215,7 @@ async function pixDaCobranca(cobranca, cliente) {
     valor: cobranca.valor,
     txid: `C${cobranca.id}`,
   });
-  return { codigo, qr: await qrDataUrl(codigo), cliente: cliente && cliente.nome };
+  return { codigo, qr: await qrDataUrl(codigo), cliente: cliente && cliente.nome, link: null, asaas: false };
 }
 
 async function registrar(msg) {
@@ -209,11 +231,12 @@ async function registrar(msg) {
 async function enviarCobranca(cobranca, cliente, etapa) {
   const c = await cfg.obter();
   const numero = U.normalizarTelefone(cliente.telefone);
-  const texto = await renderizar(etapa.modelo, cliente, cobranca);
+  let texto = '';
   try {
     if (!U.telefoneValido(numero)) throw new Error('Telefone inválido');
-    await wa.enviarTexto(numero, texto);
     const pix = await pixDaCobranca(cobranca, cliente);
+    texto = await renderizar(etapa.modelo, cliente, cobranca, { link: pix && pix.link });
+    await wa.enviarTexto(numero, texto);
     if (pix) {
       if (c.enviar_qr_code) {
         await wa.enviarImagem(numero, pix.qr, 'QR Code Pix');

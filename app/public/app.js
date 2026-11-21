@@ -396,7 +396,7 @@ async function modalPrevia(cobId) {
   const p = await api(`/cobrancas/${cobId}/previa`);
   abrirModal(`<div class="modal-topo"><h2>Mensagem · ${esc(p.etapa_nome)}</h2><button class="fechar" data-fechar>×</button></div>
     <div class="modal-corpo"><div class="previa">${esc(p.texto)}</div>
-    ${p.pix ? `<div class="previa" style="margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:11px;word-break:break-all">${esc(p.pix)}</div>` : '<div class="aviso" style="margin-top:10px">Cadastre a chave Pix em Configurações para enviar o Pix junto.</div>'}</div>
+    ${p.pix ? `<div class="previa" style="margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:11px;word-break:break-all">${esc(p.pix)}</div>${p.asaas ? `<div class="muted pequeno" style="margin-top:6px">${ic('pix', 'ic-in')} Pix automático do Asaas (baixa sozinha quando pagar)</div>` : ''}` : '<div class="aviso" style="margin-top:10px">Cadastre a chave Pix em Configurações para enviar o Pix junto.</div>'}</div>
     <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario" id="enviar-agora">Enviar agora</button></div>`);
   $('#enviar-agora').onclick = async () => {
     $('#enviar-agora').disabled = true;
@@ -495,6 +495,11 @@ function modalCliente(c, aoSalvar) {
           <div class="ajuda" id="ajuda-prim"></div></label>
         <div class="aviso info pequeno f-avulso">Cliente sem cobrança fixa: use <b>Lançar consumo</b> na ficha dele para cobrar algo avulso ou pendurar no fiado.</div>
         <div class="linha">
+          <label>CPF ou CNPJ ${CONFIG.asaas_ativo ? '' : '(opcional)'}<input name="cpf_cnpj" inputmode="numeric" placeholder="só números" value="${esc(c.cpf_cnpj || '')}">
+            ${CONFIG.asaas_ativo ? '<div class="ajuda">Necessário para o Pix automático (Asaas).</div>' : ''}</label>
+          ${CONFIG.asaas_ativo ? `<label class="check" style="align-self:center"><input type="checkbox" name="pix_asaas" ${c.pix_asaas !== false ? 'checked' : ''}> Cobrar pelo Pix automático (Asaas)</label>` : '<span></span>'}
+        </div>
+        <div class="linha">
           <label>Identificação (opcional)<input name="identificacao" placeholder="ex.: apelido, empresa" value="${esc(c.identificacao || '')}"></label>
           <label>Endereço (opcional)<input name="endereco" value="${esc(c.endereco || '')}"></label>
         </div>
@@ -528,6 +533,7 @@ function modalCliente(c, aoSalvar) {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(f));
     body.ativo = f.ativo.checked; body.pausado = f.pausado.checked;
+    body.pix_asaas = f.pix_asaas ? f.pix_asaas.checked : c.pix_asaas !== false;
     if (!novo && (body.forma === 'semanal' || body.forma === 'quinzenal') && Number(body.dia_semana) !== Number(c.dia_semana) && body.primeiro_vencimento === c.primeiro_vencimento) body.primeiro_vencimento = '';
     try {
       await api(novo ? '/clientes' : `/clientes/${c.id}`, { method: novo ? 'POST' : 'PUT', body });
@@ -552,7 +558,7 @@ async function modalFichaCliente(id) {
     return `<span class="tag aberto">Na cobrança de ${brData(x.cob_vencimento)}</span>`;
   };
   abrirModal(`
-    <div class="modal-topo"><div><h2>${esc(c.nome)}</h2><div class="muted pequeno">${fone(c.telefone)} · ${c.forma === 'avulso' ? '' : brl(c.valor) + ' · '}${esc(formaCliente(c))}</div></div><button class="fechar" data-fechar>×</button></div>
+    <div class="modal-topo"><div><h2>${esc(c.nome)}</h2><div class="muted pequeno">${fone(c.telefone)} · ${c.forma === 'avulso' ? '' : brl(c.valor) + ' · '}${esc(formaCliente(c))}${c.cpf_cnpj ? ` · ${c.cpf_cnpj.length === 11 ? 'CPF' : 'CNPJ'} ${esc(c.cpf_cnpj)}` : ''}</div></div><button class="fechar" data-fechar>×</button></div>
     <div class="modal-corpo">
       ${c.observacoes ? `<div class="aviso info">${esc(c.observacoes)}</div>` : ''}
       <div class="cartao-topo" style="padding:0;margin-bottom:8px;border:0"><h3 style="margin:0">Consumo avulso / fiado</h3>
@@ -574,7 +580,7 @@ async function modalFichaCliente(id) {
       <div class="tabela-wrap cartao" style="margin-bottom:16px"><table><thead><tr><th>Referente a</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
       ${c.cobrancas.map((cb) => `<tr><td>${esc(refCobranca(cb, c.forma))}${cb.numero_parcela ? ` <span class="sub2">(${cb.numero_parcela}/${c.parcelas_total})</span>` : ''}${cb.tipo === 'avulsa' ? ' <span class="tag">avulsa</span>' : ''}</td>
         <td>${brData(cb.vencimento)}</td><td class="num">${brl(cb.valor)}</td>
-        <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">pago ${brData(cb.pago_em)}</div>` : ''}</td>
+        <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">pago ${brData(cb.pago_em)}${/^Asaas/.test(cb.pago_por || '') ? ' · Asaas' : ''}</div>` : ''}${infoAsaas(cb)}</td>
         <td class="num">${acoesCobranca(cb)}</td></tr>`).join('') || '<tr><td colspan="5" class="vazio">Sem cobranças</td></tr>'}
       </tbody></table></div>
       <h3>Cobranças enviadas pelo WhatsApp</h3>
@@ -606,6 +612,14 @@ async function modalFichaCliente(id) {
   });
 }
 
+// situação no Asaas (só aparece com o Pix automático ligado)
+function infoAsaas(cb) {
+  if (!CONFIG || !CONFIG.asaas_ativo || cb.status !== 'aberto') return '';
+  if (cb.asaas_erro) return `<div class="sub2" style="color:var(--amarelo)" title="${esc(cb.asaas_erro)}">${ic('alerta', 'ic-in')} ${esc(cb.asaas_erro.length > 46 ? cb.asaas_erro.slice(0, 44) + '…' : cb.asaas_erro)}</div>`;
+  if (cb.asaas_id) return `<div class="sub2">${ic('pix', 'ic-in')} Pix automático</div>`;
+  return '';
+}
+
 function acoesCobranca(cb) {
   if (cb.status === 'pago') return `<button class="btn mini" data-desfazer="${cb.id}">Desfazer</button>`;
   if (cb.status === 'cancelado') return '';
@@ -629,7 +643,7 @@ function ligarAcoesCobranca(raiz, recarregar) {
     try {
       const p = await api(`/cobrancas/${b.dataset.pix}/pix`);
       abrirModal(`<div class="modal-topo"><h2>Pix · ${esc(p.cliente)}</h2><button class="fechar" data-fechar>×</button></div>
-        <div class="modal-corpo" style="text-align:center"><img src="${p.qr}" style="width:240px;height:240px"><div class="codigo" style="text-align:left">${esc(p.codigo)}</div></div>
+        <div class="modal-corpo" style="text-align:center">${p.asaas ? `<div class="aviso ok pequeno" style="text-align:left">${ic('check')} Pix do Asaas: quando o cliente pagar, a baixa é automática.${p.link ? ` <a href="${esc(p.link)}" target="_blank" rel="noopener">Abrir página de pagamento</a>` : ''}</div>` : ''}<img src="${p.qr}" style="width:240px;height:240px"><div class="codigo" style="text-align:left">${esc(p.codigo)}</div></div>
         <div class="modal-rodape"><button class="btn" data-fechar>Fechar</button><button class="btn primario" id="copiar-pix">Copiar código</button></div>`);
       $('#copiar-pix').onclick = async () => { (await copiarTexto(p.codigo)) ? toast('Código copiado ✓') : toast('Não consegui copiar. Selecione o código e copie.', true); };
     } catch (e) { toast(e.message, true); }
@@ -670,7 +684,7 @@ async function pgCobrancas(el) {
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Cobranças</h1><div class="muted">Mensalidades, semanais, parcelas e avulsas do mês.</div></div>
       <div class="acoes"><button class="btn" id="mes-ant" aria-label="Mês anterior">${ic('esquerda')}</button><b style="min-width:140px;text-align:center">${MESES[m - 1]} ${y}</b><button class="btn" id="mes-prox" aria-label="Próximo mês">${ic('direita')}</button>
-      <a class="btn cfg-regua" href="#/config">${ic('whatsapp')} Régua de avisos</a><a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">${ic('baixar')} CSV</a></div></div>
+      <a class="btn cfg-regua" href="#/config">${ic('whatsapp')} Régua de avisos</a>${CONFIG.asaas_ativo ? `<button class="btn" id="asaas-conferir" title="Pergunta ao Asaas se alguém pagou">${ic('pix')} Conferir pagamentos</button>` : ''}<a class="btn" href="/api/exportar/cobrancas.csv?mes=${d.mes}">${ic('baixar')} CSV</a></div></div>
     ${d.anteriores.n ? `<div class="aviso">Há ${d.anteriores.n} cobrança(s) de meses anteriores ainda em aberto (${brl(d.anteriores.v)}). <a href="#" id="ver-atrasadas">Ver lista →</a></div>` : ''}
     <div class="grade g4">
       <div class="cartao kpi"><div class="rotulo">Previsto</div><div class="valor">${brl(r.previsto)}</div><div class="det">${r.qtd} cobrança(s)</div></div>
@@ -694,13 +708,18 @@ async function pgCobrancas(el) {
       <td><b>${esc(cb.nome)}</b> ${cb.tipo === 'avulsa' ? '<span class="tag">avulsa</span>' : ''}<div class="sub2">${fone(cb.telefone)} · ${esc(refCobranca(cb, cb.forma))}${cb.numero_parcela ? ` · parcela ${cb.numero_parcela}/${cb.parcelas_total}` : ''}</div></td>
       <td>${brData(cb.vencimento)}</td>
       <td class="num">${brl(cb.valor)}${cb.pago_valor && cb.pago_valor !== cb.valor ? `<div class="sub2">pago ${brl(cb.pago_valor)}</div>` : ''}</td>
-      <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">em ${brData(cb.pago_em)}</div>` : ''}</td>
+      <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">em ${brData(cb.pago_em)}${/^Asaas/.test(cb.pago_por || '') ? ' · baixa automática' : ''}</div>` : ''}${infoAsaas(cb)}</td>
       <td class="pequeno muted">${cb.qtd_msgs ? `${cb.qtd_msgs} enviado(s)<br>último ${brDataHora(cb.ultima_msg)}` : '—'}</td>
       <td class="num">${acoesCobranca(cb)}</td></tr>`).join('') : '<tr><td colspan="6" class="vazio"><b>Nenhuma cobrança</b>Cadastre clientes para gerar as cobranças do mês.</td></tr>';
     ligarAcoesCobranca($('#tb-cob'), rotear);
   };
   $('#f-cob').onchange = (e) => { filtroCob = e.target.value; desenhar(); };
   const mudar = (n) => { const dt = new Date(y, m - 1 + n, 1); mesCob = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`; rotear(); };
+  const ac = $('#asaas-conferir');
+  if (ac) ac.onclick = async () => {
+    ac.disabled = true;
+    try { await api('/asaas/conferir', { method: 'POST' }); toast('Pagamentos conferidos ✓'); atualizarIndicadores(); rotear(); } catch (e) { toast(e.message, true); ac.disabled = false; }
+  };
   $('#mes-ant').onclick = () => mudar(-1);
   $('#mes-prox').onclick = () => mudar(1);
   const va = $('#ver-atrasadas');
@@ -847,6 +866,7 @@ const NOMES_MODULO = {
 const ABAS_CFG = [
   ['negocio', 'Negócio', 'painel', /^Negócio$/i],
   ['cobranca', 'Régua de avisos e Pix', 'whatsapp', /Empresa|Régua|Envio automático|Após o pagamento|comprovante|avulsa/i],
+  ['asaas', 'Pix automático (Asaas)', 'pix', /Asaas/i],
   ['agenda', 'Agenda', 'agenda', /^Agenda$|Lista de espera/i],
   ['online', 'Agendamento online', 'link', /Agendamento online/i],
   ['retorno', 'Retorno de clientes', 'whatsapp', /Retorno/i],
@@ -858,7 +878,7 @@ function abasConfig(el) {
   area.className = 'cfg-cartoes';
   for (const c of cartoes) {
     const t = (($('h3', c) || {}).textContent || '').trim();
-    const aba = ABAS_CFG.find((a) => a[3].test(t)) || ABAS_CFG[0];
+    const aba = ABAS_CFG.find((a) => a[0] === 'asaas' && a[3].test(t)) || ABAS_CFG.find((a) => a[3].test(t)) || ABAS_CFG[0];
     c.dataset.aba = aba[0]; c.style.margin = '';
     area.appendChild(c);
   }
@@ -920,8 +940,8 @@ async function pgConfig(el) {
         <div class="cartao pad">
           <h3>Régua de cobrança</h3>
           <p class="muted pequeno">Cada cliente recebe no máximo uma mensagem por dia. Se o sistema ficar desligado, ele manda só a etapa mais recente (até ${c.tolerancia_dias} dia(s) de atraso da etapa).</p>
-          <div class="vars">Campos: ${['primeiro_nome', 'nome', 'valor', 'vencimento', 'descricao', 'dias_atraso', 'empresa', 'parcela', 'mes', 'total_aberto', 'pix'].map((v) => `<code data-var="{${v}}">{${v}}</code>`).join(' ')}</div>
-          <p class="muted pequeno">{descricao} vira “mensalidade de novembro/2026”, “semana de 07/11”, “parcela 3/10” ou o que foi consumido (ex.: Corte).</p>
+          <div class="vars">Campos: ${['primeiro_nome', 'nome', 'valor', 'vencimento', 'descricao', 'dias_atraso', 'empresa', 'parcela', 'mes', 'total_aberto', 'pix', 'link_pagamento'].map((v) => `<code data-var="{${v}}">{${v}}</code>`).join(' ')}</div>
+          <p class="muted pequeno">{descricao} vira “mensalidade de novembro/2026”, “semana de 07/11”, “parcela 3/10” ou o que foi consumido (ex.: Corte). {link_pagamento} é a página de pagamento do Asaas (só com o Pix automático ligado).</p>
           <div id="regua"></div>
           <button type="button" class="btn" id="add-etapa">${ic('mais')} Adicionar etapa</button>
         </div>
@@ -989,6 +1009,31 @@ async function pgConfig(el) {
           <label>Mensagem<textarea name="retorno_msg">${esc(c.retorno_msg)}</textarea></label>
           <div id="retorno-info" class="muted pequeno"></div>
           <p class="muted pequeno">Só chama quem teve atendimento concluído na agenda, não tem horário marcado e ainda não foi chamado desde a última visita. Cada pessoa recebe no máximo uma vez por visita.</p>
+        </div>
+        <div class="cartao pad" style="margin-top:14px" id="cfg-asaas">
+          <h3>Pix automático (Asaas)</h3>
+          <p class="muted pequeno" style="margin-top:0">Cada cobrança sai com um Pix próprio e, quando o cliente paga, o sistema <b>dá baixa sozinho</b>, sem precisar conferir comprovante. O dinheiro cai na conta Asaas da empresa.</p>
+          <div id="asaas-status"></div>
+          <label class="check"><input type="checkbox" name="asaas_ativo" ${c.asaas_ativo ? 'checked' : ''}> <b>Usar o Pix automático do Asaas</b></label>
+          <label>Chave de API do Asaas<input name="asaas_chave" type="password" autocomplete="off" spellcheck="false">
+            <div class="ajuda">No Asaas: <b>Integrações → Chaves de API → Gerar chave</b>. Chave de teste (sandbox) começa com <code>$aact_hmlg_</code>; de produção, com <code>$aact_prod_</code>.</div></label>
+          <label>E-mail para avisos do Asaas<input name="asaas_email" type="email" value="${esc(c.asaas_email || '')}" placeholder="ex.: financeiro@empresa.com.br">
+            <div class="ajuda">O Asaas avisa por e-mail se não conseguir falar com o sistema.</div></label>
+          <div class="acoes" style="margin-bottom:10px">
+            <button type="button" class="btn" id="asaas-testar">${ic('check')} Testar conexão</button>
+            <button type="button" class="btn" id="asaas-webhook">${ic('link')} Ativar aviso de pagamento</button>
+            <button type="button" class="btn mini perigo hidden" id="asaas-remover">Remover chave</button>
+          </div>
+          <div id="asaas-res"></div>
+          <details class="pequeno"><summary style="cursor:pointer;font-weight:600">Como configurar (passo a passo)</summary>
+            <ol class="passos" style="margin-top:8px">
+              <li>Crie a conta em <a href="https://www.asaas.com" target="_blank" rel="noopener">asaas.com</a> (ou em <a href="https://sandbox.asaas.com" target="_blank" rel="noopener">sandbox.asaas.com</a> para testar) e <b>cadastre uma chave Pix</b> na conta.</li>
+              <li>Gere a chave de API, cole aqui, marque “Usar o Pix automático” e clique em <b>Salvar configurações</b>.</li>
+              <li>Clique em <b>Testar conexão</b> e depois em <b>Ativar aviso de pagamento</b>.</li>
+              <li>Cadastre o <b>CPF ou CNPJ</b> dos clientes (o Asaas exige). Quem estiver sem documento continua recebendo o Pix direto, como antes.</li>
+            </ol>
+            <p class="muted">Se um cliente pagar em dinheiro ou a cobrança for cancelada aqui, o Pix do Asaas é cancelado sozinho. Mesmo sem o aviso, o sistema confere os pagamentos a cada 5 minutos. Dá para desligar o Asaas só para um cliente, no cadastro dele.</p>
+          </details>
         </div>
         <div class="cartao pad" style="margin-top:14px">
           <h3>Cobrança avulsa (consumo / fiado)</h3>
@@ -1072,7 +1117,45 @@ async function pgConfig(el) {
       if (JSON.stringify(antesMod) !== JSON.stringify([CONFIG.ramo, CONFIG.modulos])) { aplicarMenu(); aplicarTermos($('.sidebar')); rotear(); }
     } catch (e) { toast(e.message, true); throw e; }
   };
-  $('#salvar-cfg').onclick = () => salvarCfg(false);
+  // Asaas: a chave salva nunca volta para a tela; mostra só o final dela
+  const asaasUI = () => {
+    const k = f.asaas_chave;
+    if (!k) return;
+    k.value = '';
+    k.placeholder = CONFIG.asaas_chave_salva ? `Chave salva (termina em …${CONFIG.asaas_chave_fim}). Deixe em branco para manter.` : 'Cole aqui a chave ($aact_prod_… ou $aact_hmlg_…)';
+    $('#asaas-remover').classList.toggle('hidden', !CONFIG.asaas_chave_salva);
+    const amb = CONFIG.asaas_ambiente === 'sandbox' ? '<b>ambiente de TESTE (sandbox)</b>' : '<b>produção</b>';
+    $('#asaas-status').innerHTML = !CONFIG.asaas_chave_salva ? '<div class="aviso pequeno">Nenhuma chave cadastrada. Enquanto isso, as cobranças usam o Pix direto da chave acima.</div>'
+      : CONFIG.asaas_ativo ? `<div class="aviso ok pequeno">${ic('check')} Ligado em ${amb}. Clientes com CPF/CNPJ recebem o Pix do Asaas.</div>`
+        : `<div class="aviso info pequeno">Chave salva (${amb}), mas o Pix automático está desligado.</div>`;
+  };
+  asaasUI();
+  const salvarEAsaas = async () => { await salvarCfg(true); asaasUI(); };
+  $('#asaas-testar').onclick = async () => {
+    const box = $('#asaas-res');
+    box.innerHTML = '<p class="muted pequeno">Testando…</p>';
+    try {
+      await salvarEAsaas();
+      const r = await api('/asaas/testar', { method: 'POST' });
+      box.innerHTML = `<div class="aviso ok pequeno">${ic('check')} Conectado ao Asaas (${r.ambiente === 'sandbox' ? 'teste' : 'produção'}). Saldo: <b>${brl(r.saldo)}</b>.</div>`
+        + (r.chaves_pix === 0 ? '<div class="aviso pequeno">A conta ainda não tem <b>chave Pix</b> cadastrada. Cadastre uma no app ou site do Asaas, senão o Pix não é gerado.</div>' : '');
+    } catch (e) { box.innerHTML = `<div class="aviso pequeno">${ic('alerta')} ${esc(e.message)}</div>`; }
+  };
+  $('#asaas-webhook').onclick = async () => {
+    const box = $('#asaas-res');
+    box.innerHTML = '<p class="muted pequeno">Configurando o aviso no Asaas…</p>';
+    try {
+      await salvarEAsaas();
+      const r = await api('/asaas/webhook', { method: 'POST' });
+      box.innerHTML = `<div class="aviso ok pequeno">${ic('check')} Pronto! O Asaas vai avisar os pagamentos em <code>${esc(r.url)}</code>.</div>`;
+    } catch (e) { box.innerHTML = `<div class="aviso pequeno">${ic('alerta')} ${esc(e.message)}</div>`; }
+  };
+  $('#asaas-remover').onclick = async () => {
+    if (!(await confirmar('Remover a chave do Asaas?', 'As próximas cobranças voltam a usar o Pix direto. As que já foram para o Asaas continuam lá.', 'Remover', true))) return rotear();
+    try { CONFIG = await api('/config', { method: 'PUT', body: { asaas_chave: '-', asaas_ativo: false } }); toast('Chave removida'); } catch (e) { toast(e.message, true); }
+    rotear();
+  };
+  $('#salvar-cfg').onclick = async () => { await salvarCfg(false).catch(() => {}); asaasUI(); };
   $('#copiar-link').onclick = async () => { (await copiarTexto(location.origin + '/agendar')) ? toast('Link copiado ✓') : toast('Não consegui copiar o link.', true); };
   api('/retorno/previa').then((r) => {
     const box = $('#retorno-info');

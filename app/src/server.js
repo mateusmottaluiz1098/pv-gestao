@@ -12,6 +12,7 @@ const REL = require('./relacionamento');
 const ESP = require('./espera');
 const PAC = require('./pacotes');
 const RELAT = require('./relatorios');
+const ASAAS = require('./asaas');
 const U = require('./util');
 
 const app = express();
@@ -71,6 +72,11 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/logout', (req, res) => {
   res.setHeader('Set-Cookie', 'sessao=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
   res.json({ ok: true });
+});
+
+// ---------- Webhook do Asaas (pagamento recebido) ----------
+app.post('/webhook/asaas', (req, res) => {
+  ASAAS.receberWebhook(req, res).catch((e) => { console.error('[asaas] webhook:', e.message); if (!res.headersSent) res.status(500).json({ erro: 'falha' }); });
 });
 
 // ---------- Webhook do WhatsApp (antes da proteção por login) ----------
@@ -289,6 +295,8 @@ const FORMAS_CLIENTE = ['mensal', 'semanal', 'quinzenal', 'carne', 'avulso'];
 function validarCliente(b) {
   const nome = String(b.nome || '').trim();
   if (!nome) throw erro(400, 'Informe o nome');
+  const cpfCnpj = ASAAS.soDigitos(b.cpf_cnpj) || null;
+  if (cpfCnpj && !ASAAS.docValido(cpfCnpj)) throw erro(400, 'CPF/CNPJ inválido. Confira os números (ou deixe em branco).');
   const telefone = U.normalizarTelefone(b.telefone);
   if (!U.telefoneValido(telefone)) throw erro(400, 'Telefone inválido. Use DDD + número, ex.: 51 99999-9999');
   const forma = FORMAS_CLIENTE.includes(b.forma) ? b.forma : 'mensal';
@@ -321,6 +329,7 @@ function validarCliente(b) {
     nome, telefone, valor, forma, dia_vencimento: dia, dia_semana: diaSemana, primeiro_vencimento: primeiro, parcelas_total: parcelas,
     identificacao: b.identificacao || null, endereco: b.endereco || null, observacoes: b.observacoes || null,
     ativo: b.ativo !== false, pausado: !!b.pausado,
+    cpf_cnpj: cpfCnpj, pix_asaas: b.pix_asaas !== false,
   };
 }
 
@@ -351,9 +360,9 @@ app.get('/api/clientes/:id', rota(async (req, res) => {
 app.post('/api/clientes', pode('clientes'), rota(async (req, res) => {
   const c = validarCliente(req.body);
   const { rows } = await q(
-    `INSERT INTO clientes (nome, telefone, valor, forma, dia_vencimento, primeiro_vencimento, parcelas_total, identificacao, endereco, observacoes, ativo, pausado, dia_semana)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-    [c.nome, c.telefone, c.valor, c.forma, c.dia_vencimento, c.primeiro_vencimento, c.parcelas_total, c.identificacao, c.endereco, c.observacoes, c.ativo, c.pausado, c.dia_semana]
+    `INSERT INTO clientes (nome, telefone, valor, forma, dia_vencimento, primeiro_vencimento, parcelas_total, identificacao, endereco, observacoes, ativo, pausado, dia_semana, cpf_cnpj, pix_asaas)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+    [c.nome, c.telefone, c.valor, c.forma, c.dia_vencimento, c.primeiro_vencimento, c.parcelas_total, c.identificacao, c.endereco, c.observacoes, c.ativo, c.pausado, c.dia_semana, c.cpf_cnpj, c.pix_asaas]
   );
   await C.gerarCobrancas(rows[0].id);
   res.json(rows[0]);
@@ -365,8 +374,8 @@ app.put('/api/clientes/:id', pode('clientes'), rota(async (req, res) => {
   if (!antes[0]) throw erro(404, 'Cliente não encontrado');
   const { rows } = await q(
     `UPDATE clientes SET nome=$1, telefone=$2, valor=$3, forma=$4, dia_vencimento=$5, primeiro_vencimento=$6, parcelas_total=$7,
-       identificacao=$8, endereco=$9, observacoes=$10, ativo=$11, pausado=$12, dia_semana=$14 WHERE id=$13 RETURNING *`,
-    [c.nome, c.telefone, c.valor, c.forma, c.dia_vencimento, c.primeiro_vencimento, c.parcelas_total, c.identificacao, c.endereco, c.observacoes, c.ativo, c.pausado, req.params.id, c.dia_semana]
+       identificacao=$8, endereco=$9, observacoes=$10, ativo=$11, pausado=$12, dia_semana=$14, cpf_cnpj=$15, pix_asaas=$16 WHERE id=$13 RETURNING *`,
+    [c.nome, c.telefone, c.valor, c.forma, c.dia_vencimento, c.primeiro_vencimento, c.parcelas_total, c.identificacao, c.endereco, c.observacoes, c.ativo, c.pausado, req.params.id, c.dia_semana, c.cpf_cnpj, c.pix_asaas]
   );
   await C.ajustarCobrancasFuturas(rows[0], antes[0]);
   await C.gerarCobrancas(rows[0].id);
@@ -424,9 +433,10 @@ app.post('/api/cobrancas/:id/cancelar', pode('pagamentos'), rota(async (req, res
 }));
 
 app.get('/api/cobrancas/:id/pix', rota(async (req, res) => {
-  const { rows } = await q('SELECT cb.*, cl.nome FROM cobrancas cb JOIN clientes cl ON cl.id=cb.cliente_id WHERE cb.id=$1', [req.params.id]);
+  const { rows } = await q('SELECT * FROM cobrancas WHERE id=$1', [req.params.id]);
   if (!rows[0]) throw erro(404, 'Cobrança não encontrada');
-  const pix = await C.pixDaCobranca(rows[0], rows[0]);
+  const { rows: cl } = await q('SELECT * FROM clientes WHERE id=$1', [rows[0].cliente_id]);
+  const pix = await C.pixDaCobranca(rows[0], cl[0]);
   if (!pix) throw erro(400, 'Cadastre a chave Pix em Configurações');
   res.json(pix);
 }));
@@ -436,9 +446,9 @@ app.get('/api/cobrancas/:id/previa', rota(async (req, res) => {
   if (!rows[0]) throw erro(404, 'Cobrança não encontrada');
   const { rows: cl } = await q('SELECT * FROM clientes WHERE id=$1', [rows[0].cliente_id]);
   const etapa = await etapaPara(rows[0]);
-  const texto = await C.renderizar(etapa.modelo, cl[0], rows[0]);
   const pix = await C.pixDaCobranca(rows[0], cl[0]);
-  res.json({ texto, pix: pix && pix.codigo, etapa: etapa.id, etapa_nome: C.nomeEtapa(etapa.dias) });
+  const texto = await C.renderizar(etapa.modelo, cl[0], rows[0], { link: pix && pix.link });
+  res.json({ texto, pix: pix && pix.codigo, asaas: !!(pix && pix.asaas), etapa: etapa.id, etapa_nome: C.nomeEtapa(etapa.dias) });
 }));
 
 async function etapaPara(cb) {
@@ -538,12 +548,22 @@ app.post('/api/whatsapp/teste', pode('whatsapp'), rota(async (req, res) => {
 }));
 
 // ---------- Configurações ----------
-app.get('/api/config', rota(async (req, res) => {
-  const c = await cfg.obter();
-  if (!USR.ehProf(req.usuario)) return res.json(c);
+// a chave do Asaas e o token do webhook nunca vão para o navegador
+function configPublica(c, usuario) {
+  const { asaas_chave, asaas_webhook_token, _logo, ...resto } = c;
+  const chave = String(asaas_chave || '');
+  resto.asaas_chave_salva = !!chave;
+  resto.asaas_chave_fim = chave ? chave.slice(-4) : '';
+  resto.asaas_ambiente = chave ? ASAAS.ambienteDaChave(chave) : null;
+  const base = process.env.URL_PUBLICA || c._url_publica;
+  resto.asaas_webhook_url = base ? `${base}/webhook/asaas` : null;
+  if (!USR.ehProf(usuario)) return resto;
   // profissional não precisa ver Pix nem textos de cobrança
-  const { pix_chave, pix_nome, pix_tipo, regua, ...resto } = c;
-  res.json(resto);
+  const { pix_chave, pix_nome, pix_tipo, regua, asaas_email, ...prof } = resto;
+  return prof;
+}
+app.get('/api/config', rota(async (req, res) => {
+  res.json(configPublica(await cfg.obter(), req.usuario));
 }));
 app.put('/api/config', rota(async (req, res) => {
   const b = { ...(req.body || {}) };
@@ -554,6 +574,18 @@ app.put('/api/config', rota(async (req, res) => {
     if (MARCA.includes(k) ? !podeMarca : !podeCfg) delete b[k];
   }
   if (!Object.keys(b).length) throw erro(403, 'Seu usuário não tem permissão para alterar isso.');
+  // Asaas: chave em branco = manter a salva; o token do webhook é só do servidor
+  delete b.asaas_webhook_token;
+  for (const k of ['asaas_chave_salva', 'asaas_chave_fim', 'asaas_ambiente', 'asaas_webhook_url']) delete b[k];
+  if ('asaas_chave' in b) {
+    b.asaas_chave = String(b.asaas_chave || '').trim();
+    if (!b.asaas_chave) delete b.asaas_chave;
+    else if (b.asaas_chave === '-') b.asaas_chave = '';
+    else if (!/^\$?aact_(prod|hmlg)_/.test(b.asaas_chave)) throw erro(400, 'Essa não parece uma chave de API do Asaas (começa com $aact_prod_ ou $aact_hmlg_).');
+    else if (!b.asaas_chave.startsWith('$')) b.asaas_chave = '$' + b.asaas_chave;
+  }
+  if ('asaas_ativo' in b) b.asaas_ativo = !!b.asaas_ativo;
+  if ('asaas_email' in b) b.asaas_email = String(b.asaas_email || '').trim();
   // ramo do negócio e módulos (o formulário manda mod_agenda, mod_caixa...)
   const modForm = Object.keys(b).filter((k) => k.startsWith('mod_'));
   if (modForm.length) {
@@ -586,7 +618,23 @@ app.put('/api/config', rota(async (req, res) => {
     b.sistema_nome = String(b.sistema_nome || '').trim().slice(0, 40);
     if (!b.sistema_nome) throw erro(400, 'Informe o nome do sistema');
   }
-  res.json(await cfg.salvar(b));
+  let salvo = await cfg.salvar(b);
+  if (salvo.asaas_ativo && !salvo.asaas_webhook_token) salvo = await cfg.salvar({ asaas_webhook_token: ASAAS.gerarToken() });
+  res.json(configPublica(salvo, req.usuario));
+}));
+
+// ---------- Asaas ----------
+app.post('/api/asaas/testar', pode('configuracoes'), rota(async (req, res) => {
+  try { res.json(await ASAAS.testar()); } catch (e) { throw erro(400, e.message); }
+}));
+app.post('/api/asaas/webhook', pode('configuracoes'), rota(async (req, res) => {
+  const c = await cfg.obter();
+  const base = process.env.URL_PUBLICA || c._url_publica || `${req.protocol}://${req.get('host')}`;
+  try { res.json(await ASAAS.configurarWebhook(base)); } catch (e) { throw erro(400, e.message); }
+}));
+app.post('/api/asaas/conferir', pode('pagamentos'), rota(async (req, res) => {
+  await ASAAS.tick();
+  res.json({ ok: true });
 }));
 
 app.post('/api/config/mensagens-ramo', pode('configuracoes'), rota(async (req, res) => res.json(await cfg.usarMensagensDoRamo())));
@@ -636,9 +684,11 @@ app.get('/api/exportar/cobrancas.csv', rota(async (req, res) => {
 app.get('/api/exportar/backup.json', pode('configuracoes'), rota(async (req, res) => {
   const tabelas = {};
   for (const t of ['config', 'clientes', 'cobrancas', 'mensagens', 'consumos', 'produtos', 'vendas', 'caixa_movimentos',
-    'profissionais', 'servicos', 'agendamentos', 'retornos_enviados', 'lista_espera', 'pacotes', 'pacotes_clientes', 'pacote_usos']) {
+    'profissionais', 'servicos', 'agendamentos', 'retornos_enviados', 'lista_espera', 'pacotes', 'pacotes_clientes', 'pacote_usos', 'asaas_eventos']) {
     tabelas[t] = (await q(`SELECT * FROM ${t}`).catch(() => ({ rows: [] }))).rows;
   }
+  // a chave do Asaas e o token do webhook não vão para o backup (ele pode ir para a nuvem)
+  tabelas.config = tabelas.config.filter((r) => !['asaas_chave', 'asaas_webhook_token'].includes(r.chave));
   // comprovantes sem o arquivo (imagem), para o backup não ficar enorme
   tabelas.comprovantes = (await q('SELECT id, cliente_id, cobranca_id, telefone, nome_contato, mimetype, nome_arquivo, legenda, status, recebido_em, resolvido_em FROM comprovantes')).rows;
   res.setHeader('Content-Disposition', `attachment; filename="backup-cobrancas-${U.hoje()}.json"`);
@@ -658,6 +708,9 @@ migrar().then(async () => {
   await REL.iniciar();
   await ESP.iniciar();
   await PAC.iniciar();
+  await ASAAS.iniciar();
+  setInterval(() => ASAAS.tick(), 5 * 60000);
+  setTimeout(() => ASAAS.tick(), 30000);
   setInterval(() => PAC.tick(), 60000);
   PAC.tick();
   setInterval(() => AG.tickLembretes(), 60000);

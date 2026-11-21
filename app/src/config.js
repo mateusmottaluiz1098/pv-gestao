@@ -138,6 +138,11 @@ const PADRAO = {
   online_dias: 30,
   online_aviso: '',
 
+  // Asaas (Pix com baixa automática)
+  asaas_ativo: false,
+  asaas_chave: '',
+  asaas_email: '',
+  asaas_webhook_token: '',
   responder_comprovante: true,
   modelo_resposta_comprovante: '📩 Recebemos seu comprovante, {primeiro_nome}! Vamos conferir e já damos baixa. Obrigado!',
 };
