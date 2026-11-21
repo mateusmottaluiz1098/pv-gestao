@@ -15,8 +15,8 @@ const RAMOS = {
     termos: { profissional: 'técnico', profissionais: 'técnicos', cliente: 'cliente', clientes: 'clientes' },
     exemplos: { servico: 'Limpeza da piscina', produto: 'Cloro granulado', consumo: 'Troca de areia do filtro', pacote: '4 limpezas no mês' },
     mensagens: {
-      agenda_msg_confirmacao: 'Olá, {primeiro_nome}! 📅 Sua visita da {empresa} está marcada:\n\n🗓️ {dia_semana}, {data} às {hora}\n👤 Técnico: {profissional}\n📋 {servico}\n\nPara confirmar responda *SIM*. Se precisar remarcar, responda *CANCELAR*.',
-      agenda_msg_lembrete: 'Oi, {primeiro_nome}! ⏰ Lembrete: {dia_semana}, {data} às {hora} o técnico {profissional} da {empresa} passa aí para {servico}.\n\nResponda *SIM* para confirmar ou *CANCELAR* se precisar remarcar.',
+      agenda_msg_confirmacao: 'Olá, {primeiro_nome}! 📅 Sua visita da {empresa} está marcada:\n\n🗓️ *{dia_semana}, {data} às {hora}*\n👤 Técnico: {profissional}\n📋 {servico}\n\nPara confirmar responda *SIM*. Se precisar remarcar, responda *CANCELAR*.',
+      agenda_msg_lembrete: 'Oi, {primeiro_nome}! ⏰ Lembrete: *{dia_semana}, {data} às {hora}* o técnico {profissional} da {empresa} passa aí para {servico}.\n\nResponda *SIM* para confirmar ou *CANCELAR* se precisar remarcar.',
     },
   },
   barbearia: {
@@ -25,8 +25,8 @@ const RAMOS = {
     termos: { profissional: 'profissional', profissionais: 'profissionais', cliente: 'cliente', clientes: 'clientes' },
     exemplos: { servico: 'Corte', produto: 'Pomada modeladora', consumo: 'Corte + barba', pacote: 'Clube: 4 cortes por mês' },
     mensagens: {
-      agenda_msg_confirmacao: 'Olá, {primeiro_nome}! ✂️ Seu horário na {empresa} está marcado:\n\n📅 {dia_semana}, {data} às {hora}\n👤 {profissional}\n💈 {servico}\n\nPara confirmar responda *SIM*. Se precisar desmarcar, responda *CANCELAR*.',
-      retorno_msg: 'Fala, {primeiro_nome}! 💈 Já faz {dias} dias desde o seu último {servico} aqui na {empresa}.\n\nBora dar um tapa no visual? {link_agendamento}',
+      agenda_msg_confirmacao: 'Olá, {primeiro_nome}! ✂️ Seu horário na {empresa} está marcado:\n\n📅 *{dia_semana}, {data} às {hora}*\n👤 {profissional}\n💈 {servico}\n\nPara confirmar responda *SIM*. Se precisar desmarcar, responda *CANCELAR*.',
+      retorno_msg: 'Fala, {primeiro_nome}! 💈 Já faz *{dias} dias* desde o seu último {servico} aqui na {empresa}.\n\nBora dar um tapa no visual? {link_agendamento}',
     },
   },
   salao: {
@@ -35,8 +35,8 @@ const RAMOS = {
     termos: { profissional: 'profissional', profissionais: 'profissionais', cliente: 'cliente', clientes: 'clientes' },
     exemplos: { servico: 'Escova', produto: 'Máscara de hidratação', consumo: 'Manicure', pacote: '5 sessões de limpeza de pele' },
     mensagens: {
-      agenda_msg_confirmacao: 'Olá, {primeiro_nome}! 💅 Seu horário na {empresa} está marcado:\n\n📅 {dia_semana}, {data} às {hora}\n👤 {profissional}\n✨ {servico}\n\nPara confirmar responda *SIM*. Se precisar desmarcar, responda *CANCELAR*.',
-      retorno_msg: 'Oi, {primeiro_nome}! ✨ Já faz {dias} dias desde o seu último {servico} aqui na {empresa}.\n\nQue tal cuidar de você de novo? {link_agendamento}',
+      agenda_msg_confirmacao: 'Olá, {primeiro_nome}! 💅 Seu horário na {empresa} está marcado:\n\n📅 *{dia_semana}, {data} às {hora}*\n👤 {profissional}\n✨ {servico}\n\nPara confirmar responda *SIM*. Se precisar desmarcar, responda *CANCELAR*.',
+      retorno_msg: 'Oi, {primeiro_nome}! ✨ Já faz *{dias} dias* desde o seu último {servico} aqui na {empresa}.\n\nQue tal cuidar de você de novo? {link_agendamento}',
     },
   },
   escola: {
@@ -45,7 +45,7 @@ const RAMOS = {
     termos: { profissional: 'professor', profissionais: 'professores', cliente: 'aluno', clientes: 'alunos' },
     exemplos: { servico: 'Aula experimental', produto: 'Garrafa de água', consumo: 'Aula avulsa', pacote: '10 aulas avulsas' },
     mensagens: {
-      agenda_msg_confirmacao: 'Olá, {primeiro_nome}! 📅 Sua aula na {empresa} está marcada:\n\n🗓️ {dia_semana}, {data} às {hora}\n👤 {profissional}\n📋 {servico}\n\nPara confirmar responda *SIM*. Se não puder vir, responda *CANCELAR*.',
+      agenda_msg_confirmacao: 'Olá, {primeiro_nome}! 📅 Sua aula na {empresa} está marcada:\n\n🗓️ *{dia_semana}, {data} às {hora}*\n👤 {profissional}\n📋 {servico}\n\nPara confirmar responda *SIM*. Se não puder vir, responda *CANCELAR*.',
     },
   },
   comercio: {
@@ -84,23 +84,23 @@ const PADRAO = {
   regua: [
     {
       id: 'antes2', dias: -2, ativo: true,
-      modelo: 'Olá, {primeiro_nome}! Tudo bem? 😊\n\nPassando só para lembrar que o pagamento de {valor} ({descricao}) vence em {vencimento}.\n\nDeixei o Pix logo abaixo para facilitar. Se já tiver pago, pode desconsiderar esta mensagem.\n\nObrigado!',
+      modelo: 'Olá, {primeiro_nome}! Tudo bem? 😊\n\nPassando só para lembrar que o pagamento de *{valor}* ({descricao}) vence em *{vencimento}*.\n\nDeixei o *Pix logo abaixo* para facilitar. Se já tiver pago, pode desconsiderar esta mensagem.\n\nObrigado!',
     },
     {
       id: 'dia0', dias: 0, ativo: true,
-      modelo: 'Oi, {primeiro_nome}! Tudo bem?\n\nHoje ({vencimento}) vence o pagamento de {valor} ({descricao}).\n\nO Pix está aqui embaixo, é só copiar e colar no app do banco. Se já pagou, pode desconsiderar. 😉',
+      modelo: 'Oi, {primeiro_nome}! Tudo bem?\n\n*Hoje ({vencimento})* vence o pagamento de *{valor}* ({descricao}).\n\nO *Pix está aqui embaixo*, é só copiar e colar no app do banco. Se já pagou, pode desconsiderar. 😉',
     },
     {
       id: 'depois1', dias: 1, ativo: true,
-      modelo: 'Oi, {primeiro_nome}, tudo bem?\n\nAinda não identificamos o pagamento de {valor} ({descricao}), que venceu ontem ({vencimento}). Deve ter sido só um esquecimento, acontece!\n\nO Pix segue abaixo. Se já pagou, pode desconsiderar.',
+      modelo: 'Oi, {primeiro_nome}, tudo bem?\n\nAinda não identificamos o pagamento de *{valor}* ({descricao}), que *venceu ontem ({vencimento})*. Deve ter sido só um esquecimento, acontece!\n\nO *Pix segue abaixo*. Se já pagou, pode desconsiderar.',
     },
     {
       id: 'depois5', dias: 5, ativo: true,
-      modelo: 'Olá, {primeiro_nome}, tudo bem?\n\nNotei que o pagamento de {valor} ({descricao}), com vencimento em {vencimento}, segue em aberto há {dias_atraso} dias.\n\nSe estiver passando por alguma dificuldade, me conta por aqui que a gente encontra a melhor solução. O Pix segue abaixo.',
+      modelo: 'Olá, {primeiro_nome}, tudo bem?\n\nNotei que o pagamento de *{valor}* ({descricao}), com vencimento em *{vencimento}*, segue em aberto há *{dias_atraso} dias*.\n\nSe estiver passando por alguma dificuldade, me conta por aqui que a gente encontra a melhor solução. O *Pix segue abaixo*.',
     },
     {
       id: 'depois10', dias: 10, ativo: true,
-      modelo: 'Olá, {primeiro_nome}, tudo bem?\n\nO pagamento de {valor} ({descricao}) está em aberto desde {vencimento}, já são {dias_atraso} dias.\n\nQuero resolver isso com você da melhor forma. Se precisar, podemos combinar uma nova data ou outro jeito que fique melhor para você. É só me responder por aqui.\n\nFico no aguardo. Obrigado!',
+      modelo: 'Olá, {primeiro_nome}, tudo bem?\n\nO pagamento de *{valor}* ({descricao}) está em aberto desde *{vencimento}*, já são *{dias_atraso} dias*.\n\nQuero resolver isso com você da melhor forma. Se precisar, podemos combinar uma *nova data* ou outro jeito que fique melhor para você. É só me responder por aqui.\n\nFico no aguardo. Obrigado!',
     },
   ],
 
@@ -110,27 +110,27 @@ const PADRAO = {
   agenda_confirmacao: true,
   agenda_lembrete: true,
   agenda_lembrete_horas: 3,
-  agenda_msg_confirmacao: 'Olá, {primeiro_nome}! 📅 Seu horário na {empresa} está marcado:\n\n🗓️ {dia_semana}, {data} às {hora}\n👤 {profissional}\n📋 {servico}\n\nPara confirmar responda *SIM*. Se precisar desmarcar, responda *CANCELAR*.',
-  agenda_msg_lembrete: 'Oi, {primeiro_nome}! ⏰ Lembrete: hoje/amanhã você tem horário na {empresa} — {dia_semana}, {data} às {hora} com {profissional}.\n\nResponda *SIM* para confirmar ou *CANCELAR* se não puder vir.',
-  agenda_msg_confirmado: 'Confirmado, {primeiro_nome}! Te esperamos {dia_semana} às {hora}. ✅',
-  agenda_msg_cancelado: 'Tudo bem, {primeiro_nome}. Seu horário de {data} às {hora} foi cancelado. Quando quiser remarcar, é só chamar aqui.',
+  agenda_msg_confirmacao: 'Olá, {primeiro_nome}! 📅 Seu horário na {empresa} está marcado:\n\n🗓️ *{dia_semana}, {data} às {hora}*\n👤 {profissional}\n📋 {servico}\n\nPara confirmar responda *SIM*. Se precisar desmarcar, responda *CANCELAR*.',
+  agenda_msg_lembrete: 'Oi, {primeiro_nome}! ⏰ Lembrete: hoje/amanhã você tem horário na {empresa} — *{dia_semana}, {data} às {hora}* com {profissional}.\n\nResponda *SIM* para confirmar ou *CANCELAR* se não puder vir.',
+  agenda_msg_confirmado: '*Confirmado*, {primeiro_nome}! Te esperamos *{dia_semana} às {hora}*. ✅',
+  agenda_msg_cancelado: 'Tudo bem, {primeiro_nome}. Seu horário de *{data} às {hora}* foi *cancelado*. Quando quiser remarcar, é só chamar aqui.',
 
   agradecer_pagamento: true,
-  modelo_agradecimento: 'Recebemos o seu pagamento de {valor}, {primeiro_nome}! 🙌\n\nMuito obrigado pela confiança.\n{empresa}',
+  modelo_agradecimento: 'Recebemos o seu pagamento de *{valor}*, {primeiro_nome}! 🙌\n\nMuito obrigado pela confiança.\n{empresa}',
 
-  modelo_avulso: 'Olá, {primeiro_nome}! 🧾 Segue o valor de {valor} referente a {descricao} na {empresa}.\n\nPode pagar pelo Pix abaixo e mandar o comprovante aqui. Obrigado!',
+  modelo_avulso: 'Olá, {primeiro_nome}! 🧾 Segue o valor de *{valor}* referente a {descricao} na {empresa}.\n\nPode pagar pelo *Pix abaixo* e mandar o *comprovante* aqui. Obrigado!',
 
   // retorno: chama de volta quem não aparece há um tempo
   retorno_ativo: false,
   retorno_dias: 30,
   retorno_hora: '10:00',
   retorno_limite: 20,
-  retorno_msg: 'Olá, {primeiro_nome}! 👋 Já faz {dias} dias desde o seu último {servico} aqui na {empresa}.\n\nQue tal marcar o próximo? {link_agendamento}',
+  retorno_msg: 'Olá, {primeiro_nome}! 👋 Já faz *{dias} dias* desde o seu último {servico} aqui na {empresa}.\n\nQue tal *marcar o próximo*? {link_agendamento}',
 
   // lista de espera: avisa no WhatsApp quando abre um horário
   espera_auto: true,
   espera_qtd_aviso: 3,
-  espera_msg: 'Olá, {primeiro_nome}! 🔔 Abriu um horário na {empresa}: {dia_semana}, {data} às {hora} com {profissional}.\n\nQuer ficar com ele? Responda aqui que a gente marca para você.',
+  espera_msg: 'Olá, {primeiro_nome}! 🔔 Abriu um horário na {empresa}: *{dia_semana}, {data} às {hora}* com {profissional}.\n\nQuer ficar com ele? Responda aqui que a gente marca para você.',
 
   // agendamento online pelo próprio cliente
   online_ativo: false,
@@ -147,7 +147,7 @@ const PADRAO = {
   msg_manual_ativo: false,
   msg_manual: 'Olá, {nome}, tudo bem?\n\nNotei que a parcela *{parcela}* de *{valor}*, com vencimento em *{vencimento}*, segue em aberto há *{dias_atraso} dias*.\n\nSei que imprevistos acontecem. Se precisar, podemos combinar uma *nova data* ou uma forma que fique melhor para você. É só me responder por aqui.\n\nFico no aguardo. Obrigado!',
   responder_comprovante: true,
-  modelo_resposta_comprovante: 'Recebemos o seu comprovante, {primeiro_nome}! 📩\n\nVamos conferir e já damos a baixa por aqui. Obrigado!',
+  modelo_resposta_comprovante: 'Recebemos o seu *comprovante*, {primeiro_nome}! 📩\n\nVamos *conferir* e já damos a baixa por aqui. Obrigado!',
 };
 
 let cache = null;
