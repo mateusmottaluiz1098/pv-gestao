@@ -441,3 +441,13 @@ body[data-pg="agenda"] .ag-resumo { padding: 7px 14px; }
 .pix-forma .seg button.sel, .pix-cliente .seg button.sel { background: var(--azul-3); color: #fff; }
 .pix-cliente { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border: 1px solid var(--borda); border-radius: var(--raio); padding: 12px 14px; margin-bottom: 16px; background: #f8fafc; }
 .pix-cliente > div:first-child { min-width: 0; flex: 1 1 220px; }
+
+/* Saldo do Asaas na barra de cima */
+.topo-saldo { margin-left: auto; margin-right: 12px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--borda); background: #fff; border-radius: 99px; padding: 5px 11px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.topo-saldo b { color: var(--verde, #14a97c); font-weight: 700; }
+.topo-saldo:hover { border-color: var(--azul-3); color: var(--texto); }
+.topo-saldo.carregando { opacity: .55; }
+.topo-saldo-teste { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; background: var(--amarelo-claro, #fff4d6); color: var(--amarelo, #b7791f); border-radius: 99px; padding: 1px 6px; }
+.topo-saldo-erro { color: var(--vermelho); }
+.topo-saldo + #topo-data { margin-left: 0; }
+@media (max-width: 760px) { .topo-saldo { margin-right: 0; padding: 4px 9px; } .topo-saldo-rot { display: none; } }

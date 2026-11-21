@@ -354,6 +354,24 @@ async function testar() {
   return { ok: true, ambiente: ci.ambiente, saldo: saldo.balance, chaves_pix: chavesPix };
 }
 
+// saldo da conta (guardado por 2 minutos para não ficar consultando o Asaas)
+let saldoCache = null;
+async function saldo(forcar) {
+  const ci = await conta();
+  if (!ci.ligado) return { ligado: false };
+  const chaveFim = ci.chave.slice(-6);
+  if (!forcar && saldoCache && saldoCache.chaveFim === chaveFim && Date.now() - saldoCache.t < 120000) return saldoCache.r;
+  let r;
+  try {
+    const b = await chamar('GET', '/finance/balance', null, ci);
+    r = { ligado: true, saldo: Number(b.balance) || 0, ambiente: ci.ambiente, em: new Date().toISOString() };
+  } catch (e) {
+    r = { ligado: true, erro: e.message, ambiente: ci.ambiente };
+  }
+  saldoCache = { t: Date.now(), chaveFim, r };
+  return r;
+}
+
 async function configurarWebhook(urlBase) {
   const ci = await conta();
   if (!ci.chave) throw new ErroAsaas('Cole a chave de API do Asaas e salve antes.', 400);
@@ -376,5 +394,5 @@ async function configurarWebhook(urlBase) {
 
 module.exports = {
   iniciar, tick, conta, chamar, usaAsaas, modoEfetivo, definirModoCobranca, definirCliente, soltarCobranca, pixDaCobranca, registrarErro, receberWebhook, confirmarPagamento,
-  testar, configurarWebhook, docValido, soDigitos, ambienteDaChave, gerarToken, ErroAsaas,
+  testar, configurarWebhook, saldo, docValido, soDigitos, ambienteDaChave, gerarToken, ErroAsaas,
 };

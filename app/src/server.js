@@ -693,6 +693,9 @@ app.post('/api/asaas/webhook', pode('configuracoes'), rota(async (req, res) => {
   const base = process.env.URL_PUBLICA || c._url_publica || `${req.protocol}://${req.get('host')}`;
   try { res.json(await ASAAS.configurarWebhook(base)); } catch (e) { throw erro(400, e.message); }
 }));
+app.get('/api/asaas/saldo', pode('financeiro'), rota(async (req, res) => {
+  res.json(await ASAAS.saldo(req.query.forcar === '1'));
+}));
 app.post('/api/asaas/conferir', pode('pagamentos'), rota(async (req, res) => {
   await ASAAS.tick();
   res.json({ ok: true });

@@ -239,6 +239,22 @@ async function atualizarIndicadores() {
 }
 
 let intervaloIndicadores = null;
+
+// Saldo da conta Asaas, discreto na barra de cima (só para quem vê o financeiro)
+let intervaloSaldo = null;
+async function atualizarSaldoAsaas(forcar) {
+  const el = $('#topo-asaas');
+  if (!el) return;
+  if (!CONFIG || !CONFIG.asaas_ativo || !CONFIG.asaas_chave_salva || !pode('financeiro') || SOU_PROF()) { el.classList.add('hidden'); return; }
+  try {
+    const r = await api(`/asaas/saldo${forcar ? '?forcar=1' : ''}`);
+    if (!r.ligado) { el.classList.add('hidden'); return; }
+    const teste = r.ambiente === 'sandbox' ? '<span class="topo-saldo-teste">teste</span>' : '';
+    el.innerHTML = r.erro ? `${ic('pix', 'ic-in')} Asaas <span class="topo-saldo-erro">indisponível</span>${teste}` : `${ic('pix', 'ic-in')} <span class="topo-saldo-rot">Asaas</span> <b>${brl(r.saldo)}</b>${teste}`;
+    el.title = r.erro ? `Não consegui ler o saldo do Asaas: ${r.erro}` : `Saldo na conta Asaas${r.ambiente === 'sandbox' ? ' (ambiente de teste)' : ''}. Atualizado às ${new Date(r.em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Clique para atualizar.`;
+    el.classList.remove('hidden');
+  } catch (e) { el.classList.add('hidden'); }
+}
 // ---------- Ramo do negócio: módulos ligados e nomes da tela ----------
 const MOD = (m) => !CONFIG || !CONFIG.modulos || CONFIG.modulos[m] !== false;
 const EX = (k, padrao) => (CONFIG && CONFIG.exemplos && CONFIG.exemplos[k]) || padrao;
@@ -288,6 +304,10 @@ async function iniciar() {
   atualizarIndicadores();
   clearInterval(intervaloIndicadores);
   intervaloIndicadores = setInterval(atualizarIndicadores, 30000);
+  atualizarSaldoAsaas();
+  clearInterval(intervaloSaldo);
+  intervaloSaldo = setInterval(() => atualizarSaldoAsaas(), 5 * 60000);
+  $('#topo-asaas').onclick = () => { $('#topo-asaas').classList.add('carregando'); atualizarSaldoAsaas(true).finally(() => $('#topo-asaas').classList.remove('carregando')); };
   rotear();
 }
 
@@ -1296,7 +1316,7 @@ async function pgConfig(el) {
         : `<div class="aviso info pequeno">Chave salva (${amb}), mas o Pix automático está desligado.</div>`;
   };
   asaasUI();
-  const salvarEAsaas = async () => { await salvarCfg(true); asaasUI(); };
+  const salvarEAsaas = async () => { await salvarCfg(true); asaasUI(); atualizarSaldoAsaas(true); };
   $('#asaas-testar').onclick = async () => {
     const box = $('#asaas-res');
     box.innerHTML = '<p class="muted pequeno">Testando…</p>';
