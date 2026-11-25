@@ -493,8 +493,11 @@ app.get('/api/cobrancas', rota(async (req, res) => {
 
 app.get('/api/cobrancas/atrasadas', rota(async (req, res) => {
   const { rows } = await q(`
-    SELECT cb.*, cl.nome, cl.telefone FROM cobrancas cb JOIN clientes cl ON cl.id=cb.cliente_id
-    WHERE cb.status='aberto' AND cb.vencimento < $1 ORDER BY cb.vencimento`, [U.hoje()]);
+    SELECT cb.*, cl.nome, cl.telefone, cl.parcelas_total, cl.identificacao, cl.forma, cl.pix_asaas AS cliente_pix_asaas, cl.cpf_cnpj AS cliente_doc,
+      (SELECT MAX(criado_em) FROM mensagens WHERE cobranca_id=cb.id AND direcao='saida' AND status='enviado') AS ultima_msg,
+      (SELECT COUNT(*)::int FROM mensagens WHERE cobranca_id=cb.id AND direcao='saida' AND status='enviado') AS qtd_msgs
+    FROM cobrancas cb JOIN clientes cl ON cl.id=cb.cliente_id
+    WHERE cb.status='aberto' AND cb.vencimento < $1 ORDER BY cb.vencimento, cl.nome`, [U.hoje()]);
   res.json(rows);
 }));
 

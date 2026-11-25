@@ -347,15 +347,15 @@ async function pgPainel(el) {
       ${d.agenda.proximos.length ? d.agenda.proximos.map((a) => `<div class="lista-item"><span class="ag-ponto" style="background:${esc(a.cor)}"></span><div class="cresce"><b>${a.inicio_local.slice(11)}</b> · ${esc(a.cliente_nome)} <span class="muted pequeno">${esc(a.servico_nome || '')} · ${esc(a.profissional_nome)}</span></div>${a.status === 'confirmado' ? '<span class="tag pago">Confirmado</span>' : '<span class="tag aberto">Agendado</span>'}</div>`).join('') : '<div class="vazio" style="padding:18px">Nenhum horário pendente para hoje.</div>'}</div>` : ''}
     ${d.comprovantes_pendentes ? `<div class="aviso">${ic('clip')} ${d.comprovantes_pendentes} comprovante(s) aguardando sua conferência. <a href="#/comprovantes">Conferir agora →</a></div>` : ''}
     <div class="grade g4">
-      <div class="cartao kpi"><div class="rotulo">Clientes ativos <span class="icone">${ic('clientes')}</span></div><div class="valor">${d.ativos}</div><div class="det">Previsto no mês: ${brl(d.previsto_mes)}</div></div>
-      <div class="cartao kpi"><div class="rotulo">Vencem hoje <span class="icone">${ic('relogio')}</span></div><div class="valor">${d.vencem_hoje.n}</div><div class="det">${brl(d.vencem_hoje.v)} em cobranças</div></div>
-      <div class="cartao kpi ${d.atraso.n ? 'alerta' : ''}"><div class="rotulo">Em atraso <span class="icone">${ic('alerta')}</span></div><div class="valor">${d.atraso.n}</div><div class="det">${brl(d.atraso.v)} pendentes</div></div>
-      <div class="cartao kpi ok"><div class="rotulo">Recebido no mês <span class="icone">${ic('check')}</span></div>${(() => {
+      <a class="cartao kpi kpi-link" href="#/clientes?f=ativo" title="Ver clientes ativos"><div class="rotulo">Clientes ativos <span class="icone">${ic('clientes')}</span></div><div class="valor">${d.ativos}</div><div class="det">Previsto no mês: ${brl(d.previsto_mes)}</div></a>
+      <a class="cartao kpi kpi-link" href="#/cobrancas?f=hoje" title="Ver cobranças que vencem hoje"><div class="rotulo">Vencem hoje <span class="icone">${ic('relogio')}</span></div><div class="valor">${d.vencem_hoje.n}</div><div class="det">${brl(d.vencem_hoje.v)} em cobranças</div></a>
+      <a class="cartao kpi kpi-link ${d.atraso.n ? 'alerta' : ''}" href="#/cobrancas?f=atraso_todos" title="Ver cobranças em atraso"><div class="rotulo">Em atraso <span class="icone">${ic('alerta')}</span></div><div class="valor">${d.atraso.n}</div><div class="det">${brl(d.atraso.v)} pendentes</div></a>
+      <a class="cartao kpi kpi-link ok" href="#/cobrancas?f=pago" title="Ver cobranças pagas no mês"><div class="rotulo">Recebido no mês <span class="icone">${ic('check')}</span></div>${(() => {
         const r = d.recebido_mes; const at = r.atendimentos || { n: 0, v: 0 }; const vd = r.vendas || { n: 0, v: 0 };
         const total = Number(r.v) + at.v + vd.v + Number(r.outros || 0);
         const partes = [r.n ? `cobranças ${brl(r.v)}` : '', at.n ? `atendimentos ${brl(at.v)}` : '', vd.n ? `produtos ${brl(vd.v)}` : '', r.outros ? `outros ${brl(r.outros)}` : ''].filter(Boolean);
         return `<div class="valor">${brl(total)}</div><div class="det">${partes.join(' · ') || 'nenhum pagamento ainda'}</div>`;
-      })()}</div>
+      })()}</a>
     </div>
     ${cartaoSemCarne(d.sem_carne)}
     <div class="grade g2" style="margin-top:14px">
@@ -718,7 +718,18 @@ async function modalPrevia(cobId) {
 
 // ---------- Clientes ----------
 let filtroClientes = { busca: '', status: '' };
+// filtro vindo de um atalho (ex.: #/cobrancas?f=hoje). É usado uma vez e some do endereço,
+// para não voltar a ser aplicado quando a página recarregar depois de uma ação.
+function filtroDoEndereco() {
+  const m = location.hash.match(/[?&]f=([\w-]+)/);
+  if (!m) return null;
+  history.replaceState(null, '', location.hash.split('?')[0]);
+  return m[1];
+}
+
 async function pgClientes(el) {
+  const fEnd = filtroDoEndereco();
+  if (fEnd !== null) filtroClientes = { busca: '', status: fEnd };
   const lista = await api('/clientes');
   el.innerHTML = `
     <div class="cabecalho"><div><h1>Clientes</h1><div class="muted">Cadastro e acompanhamento das mensalidades.</div></div>
@@ -727,7 +738,7 @@ async function pgClientes(el) {
       <div class="cartao-topo"><div class="filtros">
         <input id="busca" placeholder="Buscar por nome, telefone ou identificação" style="min-width:260px" value="${esc(filtroClientes.busca)}">
         <select id="f-status">
-          <option value="">Todos</option><option value="atraso">Em atraso</option><option value="aberto">Em aberto no mês</option>
+          <option value="">Todos</option><option value="ativo">Ativos</option><option value="atraso">Em atraso</option><option value="aberto">Em aberto no mês</option>
           <option value="pago">Pago no mês</option><option value="pausado">Pausados</option><option value="inativo">Inativos</option>
           ${CONFIG.asaas_ativo ? '<option value="asaas">Pix automático (Asaas)</option><option value="pixnormal">Pix normal</option>' : ''}
         </select></div><div class="muted pequeno" id="contagem"></div></div>
@@ -741,6 +752,7 @@ async function pgClientes(el) {
     const fil = lista.filter((c) => {
       if (b && !(`${c.nome} ${c.telefone} ${c.identificacao || ''}`.toLowerCase().includes(b))) return false;
       switch (filtroClientes.status) {
+        case 'ativo': return c.ativo;
         case 'atraso': return c.atrasadas > 0;
         case 'aberto': return c.status_mes === 'aberto';
         case 'pago': return c.status_mes === 'pago';
@@ -1000,6 +1012,8 @@ function modalPagar(id, valor, aoSalvar) {
 let mesCob = null;
 let filtroCob = '';
 async function pgCobrancas(el) {
+  const fEnd = filtroDoEndereco();
+  if (fEnd !== null) { filtroCob = fEnd; mesCob = dataLocal().slice(0, 7); }
   mesCob = mesCob || dataLocal().slice(0, 7);
   const d = await api(`/cobrancas?mes=${mesCob}`);
   HOJE = d.hoje;
@@ -1018,12 +1032,21 @@ async function pgCobrancas(el) {
       <div class="cartao kpi ${r.atrasado ? 'alerta' : ''}"><div class="rotulo">Atrasado</div><div class="valor">${brl(r.atrasado)}</div><div class="det">vencido e não pago</div></div>
     </div>
     <div class="cartao" style="margin-top:14px">
-      <div class="cartao-topo"><h2>Lista do mês</h2><div class="filtros"><select id="f-cob"><option value="">Todos</option><option value="aberto">Em aberto</option><option value="atrasado">Atrasados</option><option value="pago">Pagos</option></select></div></div>
+      <div class="cartao-topo"><h2>Lista do mês</h2><div class="filtros"><select id="f-cob"><option value="">Todos</option><option value="hoje">Vencem hoje</option><option value="aberto">Em aberto</option><option value="atrasado">Atrasados do mês</option><option value="atraso_todos">Todos em atraso (qualquer mês)</option><option value="pago">Pagos</option></select></div></div>
       <div class="tabela-wrap"><table><thead><tr><th>Cliente</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th>Lembretes</th><th></th></tr></thead><tbody id="tb-cob"></tbody></table></div>
     </div>`;
   $('#f-cob').value = filtroCob;
-  const desenhar = () => {
-    const itens = d.itens.filter((cb) => {
+  let atrasadasTodas = null; // carregadas só quando o filtro "Todos em atraso" é escolhido
+  const desenhar = async () => {
+    if (filtroCob === 'atraso_todos' && !atrasadasTodas) {
+      $('#tb-cob').innerHTML = '<tr><td colspan="6" class="muted">Carregando…</td></tr>';
+      try { atrasadasTodas = await api('/cobrancas/atrasadas'); } catch (e) { toast(e.message, true); atrasadasTodas = []; }
+      if (filtroCob !== 'atraso_todos') return;
+    }
+    const base = filtroCob === 'atraso_todos' ? atrasadasTodas : d.itens;
+    const itens = base.filter((cb) => {
+      if (filtroCob === 'atraso_todos') return true;
+      if (filtroCob === 'hoje') return cb.status === 'aberto' && cb.vencimento === HOJE;
       if (filtroCob === 'aberto') return cb.status === 'aberto';
       if (filtroCob === 'atrasado') return cb.status === 'aberto' && cb.vencimento < HOJE;
       if (filtroCob === 'pago') return cb.status === 'pago';
@@ -1035,7 +1058,7 @@ async function pgCobrancas(el) {
       <td class="num">${brl(cb.valor)}${cb.pago_valor && cb.pago_valor !== cb.valor ? `<div class="sub2">pago ${brl(cb.pago_valor)}</div>` : ''}</td>
       <td>${statusCobranca(cb)}${cb.pago_em ? `<div class="sub2">em ${brData(cb.pago_em)}${/^Asaas/.test(cb.pago_por || '') ? ' · baixa automática' : ''}</div>` : ''}${infoAsaas(cb)}</td>
       <td class="pequeno muted">${cb.qtd_msgs ? `${cb.qtd_msgs} enviado(s)<br>último ${brDataHora(cb.ultima_msg)}` : '—'}</td>
-      <td class="num">${acoesCobranca(cb)}</td></tr>`).join('') : '<tr><td colspan="6" class="vazio"><b>Nenhuma cobrança</b>Cadastre clientes para gerar as cobranças do mês.</td></tr>';
+      <td class="num">${acoesCobranca(cb)}</td></tr>`).join('') : `<tr><td colspan="6" class="vazio">${filtroCob === 'atraso_todos' ? '<b>Nenhuma cobrança em atraso</b>Tudo em dia 🎉' : filtroCob ? '<b>Nenhuma cobrança neste filtro</b>Escolha outro filtro ou outro mês.' : '<b>Nenhuma cobrança</b>Cadastre clientes para gerar as cobranças do mês.'}</td></tr>`;
     ligarAcoesCobranca($('#tb-cob'), rotear);
   };
   $('#f-cob').onchange = (e) => { filtroCob = e.target.value; desenhar(); };
